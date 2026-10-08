@@ -1,0 +1,473 @@
+import React, { useState, useMemo } from 'react';
+import {
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  StyleSheet,
+  Alert,
+} from 'react-native';
+import { Sample } from '../types';
+import { sampleStore } from '../services/sampleStore';
+
+interface HistoryViewProps {
+  samples: Sample[];
+  onRefresh: () => void;
+}
+
+export const HistoryView: React.FC<HistoryViewProps> = ({ samples, onRefresh }) => {
+  const [selectedFilter, setSelectedFilter] = useState('ALL');
+
+  // Compute aggregate statistics
+  const summary = useMemo(() => {
+    if (samples.length === 0) {
+      return { total: 0, avgDown: 0, avgUp: 0, bestPing: 0, avgJitter: 0 };
+    }
+    let sumDown = 0;
+    let sumUp = 0;
+    let bestPing = Infinity;
+    let sumJitter = 0;
+    let jitterCount = 0;
+
+    samples.forEach(s => {
+      if (s.down_mbps != null) sumDown += s.down_mbps;
+      if (s.up_mbps != null) sumUp += s.up_mbps;
+      if (s.latency_ms != null && s.latency_ms < bestPing) bestPing = s.latency_ms;
+      if (s.jitter_ms != null) {
+        sumJitter += s.jitter_ms;
+        jitterCount++;
+      }
+    });
+
+    return {
+      total: samples.length,
+      avgDown: parseFloat((sumDown / samples.length).toFixed(1)),
+      avgUp: parseFloat((sumUp / samples.length).toFixed(1)),
+      bestPing: bestPing === Infinity ? 0 : Math.round(bestPing),
+      avgJitter: jitterCount > 0 ? parseFloat((sumJitter / jitterCount).toFixed(1)) : 0,
+    };
+  }, [samples]);
+
+  // Filter list
+  const filteredSamples = useMemo(() => {
+    if (selectedFilter === 'ALL') return samples;
+    if (selectedFilter === 'WI-FI') return samples.filter(s => s.network === 'wifi');
+    if (selectedFilter === 'CELLULAR') return samples.filter(s => s.network === 'cellular');
+    if (selectedFilter === '5G') return samples.filter(s => s.radio?.includes('5G'));
+    if (selectedFilter === '4G') return samples.filter(s => s.radio?.includes('4G') || s.radio?.includes('LTE'));
+    if (selectedFilter === 'JIO') return samples.filter(s => s.carrier?.toLowerCase().includes('jio'));
+    if (selectedFilter === 'AIRTEL') return samples.filter(s => s.carrier?.toLowerCase().includes('airtel'));
+    if (selectedFilter === 'BSNL') return samples.filter(s => s.carrier?.toLowerCase().includes('bsnl'));
+    return samples;
+  }, [samples, selectedFilter]);
+
+  const handleClearHistory = () => {
+    Alert.alert(
+      'Clear Sample History',
+      'Are you sure you want to delete all saved test history on this device?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear All',
+          style: 'destructive',
+          onPress: async () => {
+            await sampleStore.clearAll();
+            onRefresh();
+          },
+        },
+      ]
+    );
+  };
+
+  const formatDate = (epochSec: number) => {
+    const d = new Date(epochSec * 1000);
+    return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} at ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  };
+
+  const filterChips = ['ALL', '5G', '4G', 'WI-FI', 'JIO', 'AIRTEL', 'BSNL'];
+
+  const renderItem = ({ item }: { item: Sample }) => {
+    return (
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <View style={styles.badgeRow}>
+            <View style={styles.carrierBadge}>
+              <Text style={styles.carrierBadgeText}>
+                {item.carrier || (item.network === 'wifi' ? 'Wi-Fi' : 'Cellular')}
+              </Text>
+            </View>
+            {item.radio ? (
+              <View style={styles.radioBadge}>
+                <Text style={styles.radioBadgeText}>{item.radio}</Text>
+              </View>
+            ) : null}
+            {item.location_type ? (
+              <View style={styles.envBadge}>
+                <Text style={styles.envBadgeText}>{item.location_type}</Text>
+              </View>
+            ) : null}
+          </View>
+          <Text style={styles.timeText}>{formatDate(item.ts)}</Text>
+        </View>
+
+        <View style={styles.metricsRow}>
+          <View style={styles.metricItem}>
+            <Text style={styles.metricLabel}>DOWNLOAD</Text>
+            <Text style={[styles.metricVal, { color: '#06B6D4' }]}>
+              {item.down_mbps != null ? item.down_mbps.toFixed(1) : '--'}
+              <Text style={styles.metricUnit}> Mbps</Text>
+            </Text>
+          </View>
+
+          <View style={styles.metricItem}>
+            <Text style={styles.metricLabel}>UPLOAD</Text>
+            <Text style={[styles.metricVal, { color: '#8B5CF6' }]}>
+              {item.up_mbps != null ? item.up_mbps.toFixed(1) : '--'}
+              <Text style={styles.metricUnit}> Mbps</Text>
+            </Text>
+          </View>
+
+          <View style={styles.metricItem}>
+            <Text style={styles.metricLabel}>PING</Text>
+            <Text style={[styles.metricVal, { color: '#F59E0B' }]}>
+              {item.latency_ms != null ? Math.round(item.latency_ms) : '--'}
+              <Text style={styles.metricUnit}> ms</Text>
+            </Text>
+          </View>
+
+          <View style={styles.metricItem}>
+            <Text style={styles.metricLabel}>JITTER</Text>
+            <Text style={[styles.metricVal, { color: '#EC4899' }]}>
+              {item.jitter_ms != null ? item.jitter_ms.toFixed(1) : '--'}
+              <Text style={styles.metricUnit}> ms</Text>
+            </Text>
+          </View>
+        </View>
+
+        {item.lat != null && item.lng != null ? (
+          <View style={styles.locationFooter}>
+            <Text style={styles.coordsText}>
+              📍 {item.lat.toFixed(5)}, {item.lng.toFixed(5)}
+              {item.accuracy != null ? ` (±${Math.round(item.accuracy)}m)` : ''}
+            </Text>
+            <Text style={styles.deviceText}>
+              {item.device_model || 'Mobile'} • {item.packet_loss_pct ?? 0}% Loss
+            </Text>
+          </View>
+        ) : null}
+      </View>
+    );
+  };
+
+  return (
+    <View style={styles.container}>
+      {/* Summary KPI Cards Strip */}
+      <View style={styles.summaryCard}>
+        <View style={styles.summaryItem}>
+          <Text style={styles.summaryLabel}>TOTAL TESTS</Text>
+          <Text style={styles.summaryValue}>{summary.total}</Text>
+        </View>
+        <View style={styles.summaryDivider} />
+        <View style={styles.summaryItem}>
+          <Text style={styles.summaryLabel}>AVG DOWNLOAD</Text>
+          <Text style={[styles.summaryValue, { color: '#06B6D4' }]}>
+            {summary.avgDown > 0 ? `${summary.avgDown} M` : '--'}
+          </Text>
+        </View>
+        <View style={styles.summaryDivider} />
+        <View style={styles.summaryItem}>
+          <Text style={styles.summaryLabel}>AVG UPLOAD</Text>
+          <Text style={[styles.summaryValue, { color: '#8B5CF6' }]}>
+            {summary.avgUp > 0 ? `${summary.avgUp} M` : '--'}
+          </Text>
+        </View>
+        <View style={styles.summaryDivider} />
+        <View style={styles.summaryItem}>
+          <Text style={styles.summaryLabel}>BEST PING</Text>
+          <Text style={[styles.summaryValue, { color: '#10B981' }]}>
+            {summary.bestPing > 0 ? `${summary.bestPing}ms` : '--'}
+          </Text>
+        </View>
+      </View>
+
+      {/* Filter Chips Carousel */}
+      <View style={styles.filterBar}>
+        <FlatList
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          data={filterChips}
+          keyExtractor={item => item}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={[
+                styles.filterChip,
+                selectedFilter === item && styles.filterChipActive,
+              ]}
+              onPress={() => setSelectedFilter(item)}>
+              <Text
+                style={[
+                  styles.filterChipText,
+                  selectedFilter === item && styles.filterChipTextActive,
+                ]}>
+                {item}
+              </Text>
+            </TouchableOpacity>
+          )}
+          contentContainerStyle={styles.filterContent}
+        />
+      </View>
+
+      {/* History List */}
+      {filteredSamples.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyIcon}>📊</Text>
+          <Text style={styles.emptyTitle}>No Test Records Found</Text>
+          <Text style={styles.emptySubtitle}>
+            Run a speed test or start continuous monitoring to populate history.
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={filteredSamples}
+          keyExtractor={item => item.id}
+          renderItem={renderItem}
+          contentContainerStyle={styles.listContent}
+        />
+      )}
+
+      {/* Actions footer */}
+      {samples.length > 0 && (
+        <View style={styles.actionRow}>
+          <TouchableOpacity style={styles.clearBtn} onPress={handleClearHistory}>
+            <Text style={styles.clearBtnText}>🗑 Clear Log</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.refreshBtn} onPress={onRefresh}>
+            <Text style={styles.refreshBtnText}>🔄 Refresh</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#0B0F19',
+  },
+  summaryCard: {
+    flexDirection: 'row',
+    backgroundColor: '#131B2E',
+    marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 10,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderWidth: 1,
+    borderColor: '#1E293B',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+  },
+  summaryItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  summaryLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#64748B',
+    letterSpacing: 0.5,
+  },
+  summaryValue: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#F8FAFC',
+    marginTop: 3,
+  },
+  summaryDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: '#1E293B',
+  },
+  filterBar: {
+    marginBottom: 8,
+  },
+  filterContent: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  filterChip: {
+    backgroundColor: '#1E293B',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  filterChipActive: {
+    backgroundColor: '#06B6D4',
+    borderColor: '#06B6D4',
+  },
+  filterChipText: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  filterChipTextActive: {
+    color: '#0F172A',
+  },
+  listContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 40,
+  },
+  card: {
+    backgroundColor: '#131B2E',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#1E293B',
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  carrierBadge: {
+    backgroundColor: 'rgba(6, 182, 212, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  carrierBadgeText: {
+    color: '#06B6D4',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  radioBadge: {
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  radioBadgeText: {
+    color: '#A78BFA',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  envBadge: {
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  envBadgeText: {
+    color: '#10B981',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  timeText: {
+    color: '#94A3B8',
+    fontSize: 11,
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+  },
+  metricItem: {
+    flex: 1,
+  },
+  metricLabel: {
+    fontSize: 9,
+    color: '#64748B',
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  metricVal: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  metricUnit: {
+    fontSize: 10,
+    fontWeight: '400',
+    color: '#94A3B8',
+  },
+  locationFooter: {
+    borderTopWidth: 1,
+    borderTopColor: '#1E293B',
+    paddingTop: 8,
+    marginTop: 6,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  coordsText: {
+    fontSize: 11,
+    color: '#94A3B8',
+    fontFamily: 'Courier',
+  },
+  deviceText: {
+    fontSize: 11,
+    color: '#64748B',
+  },
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 30,
+  },
+  emptyIcon: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  emptyTitle: {
+    color: '#F8FAFC',
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  emptySubtitle: {
+    color: '#64748B',
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#0B0F19',
+    borderTopWidth: 1,
+    borderTopColor: '#1E293B',
+  },
+  clearBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+  },
+  clearBtnText: {
+    color: '#EF4444',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  refreshBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: '#1E293B',
+  },
+  refreshBtnText: {
+    color: '#38BDF8',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+});

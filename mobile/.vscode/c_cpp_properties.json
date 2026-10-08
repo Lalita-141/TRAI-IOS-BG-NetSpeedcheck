@@ -1,0 +1,29 @@
+{
+  "configurations": [
+    {
+      "name": "Mac-iOS",
+      "includePath": [
+        "${workspaceFolder}/**",
+        "${workspaceFolder}/ios/**",
+        "${workspaceFolder}/ios/Pods/Headers/Public/**",
+        "${workspaceFolder}/ios/Pods/Headers/Private/**",
+        "${workspaceFolder}/ios/Pods/Headers/Public/React-Core-prebuilt/**",
+        "${workspaceFolder}/ios/Pods/Headers/Public/React-Core/**",
+        "${workspaceFolder}/ios/Pods/Headers/Public/React-RCTAppDelegate/**"
+      ],
+      "defines": [
+        "DEBUG=1",
+        "COCOAPODS=1",
+        "RCT_NEW_ARCH_ENABLED=1"
+      ],
+      "macFrameworkPath": [
+        "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/System/Library/Frameworks"
+      ],
+      "compilerPath": "/usr/bin/clang",
+      "cStandard": "c17",
+      "cppStandard": "c++20",
+      "intelliSenseMode": "macos-clang-arm64"
+    }
+  ],
+  "version": 4
+}
