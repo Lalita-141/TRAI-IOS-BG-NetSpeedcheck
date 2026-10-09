@@ -3,12 +3,28 @@ import { Sample } from '../types';
 
 const STORAGE_KEY_PENDING = '@speedmonitor_pending_samples';
 const STORAGE_KEY_HISTORY = '@speedmonitor_history_samples';
-const MAX_HISTORY_COUNT = 100;
+const DEFAULT_MAX_HISTORY_COUNT = 500;
 
 class SampleStore {
   private pendingCache: Sample[] | null = null;
   private historyCache: Sample[] | null = null;
+  private maxHistoryLimit: number = DEFAULT_MAX_HISTORY_COUNT;
   private lockPromise: Promise<void> = Promise.resolve();
+
+  public setMaxHistoryLimit(limit: number): void {
+    if (limit && limit > 0) {
+      this.maxHistoryLimit = limit;
+      // If current cached history exceeds new limit, trim it
+      if (this.historyCache && this.historyCache.length > limit) {
+        this.historyCache = this.historyCache.slice(0, limit);
+        this.saveHistory(this.historyCache);
+      }
+    }
+  }
+
+  public getMaxHistoryLimit(): number {
+    return this.maxHistoryLimit;
+  }
 
   private async withLock<T>(fn: () => Promise<T>): Promise<T> {
     const nextLock = this.lockPromise.then(async () => {
@@ -77,8 +93,8 @@ class SampleStore {
 
       const history = await this.loadHistory();
       history.unshift(sample); // Newest first
-      if (history.length > MAX_HISTORY_COUNT) {
-        history.length = MAX_HISTORY_COUNT;
+      if (history.length > this.maxHistoryLimit) {
+        history.length = this.maxHistoryLimit;
       }
       await this.saveHistory(history);
     });
@@ -118,12 +134,29 @@ class SampleStore {
   }
 
   /**
-   * Returns sample history for the UI
+   * Returns sample history for the UI. If limit <= 0 or not provided, returns all history.
    */
-  async getHistory(limit: number = 50): Promise<Sample[]> {
+  async getHistory(limit: number = 0): Promise<Sample[]> {
     return this.withLock(async () => {
       const history = await this.loadHistory();
-      return history.slice(0, limit);
+      if (limit > 0) {
+        return history.slice(0, limit);
+      }
+      return [...history];
+    });
+  }
+
+  /**
+   * Returns storage capacity information
+   */
+  async getCapacityInfo(): Promise<{ count: number; maxLimit: number; isFull: boolean; usagePercent: number }> {
+    return this.withLock(async () => {
+      const history = await this.loadHistory();
+      const count = history.length;
+      const maxLimit = this.maxHistoryLimit;
+      const isFull = count >= maxLimit;
+      const usagePercent = Math.min(100, Math.round((count / maxLimit) * 100));
+      return { count, maxLimit, isFull, usagePercent };
     });
   }
 

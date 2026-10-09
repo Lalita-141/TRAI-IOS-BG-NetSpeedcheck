@@ -40,7 +40,10 @@ export default function App() {
   const loadData = useCallback(async () => {
     const cfg = await getConfig();
     setConfig(cfg);
-    const history = await sampleStore.getHistory(100);
+    if (cfg.maxHistoryLimit) {
+      sampleStore.setMaxHistoryLimit(cfg.maxHistoryLimit);
+    }
+    const history = await sampleStore.getHistory(0);
     setSamplesHistory(history);
     const pending = await sampleStore.getPendingCount();
     setStatus(prev => ({
@@ -64,7 +67,7 @@ export default function App() {
     const unsubscribe = monitorService.subscribe(newStatus => {
       setStatus(newStatus);
       if (newStatus.lastSample) {
-        sampleStore.getHistory(100).then(setSamplesHistory);
+        sampleStore.getHistory(0).then(setSamplesHistory);
       }
     });
 

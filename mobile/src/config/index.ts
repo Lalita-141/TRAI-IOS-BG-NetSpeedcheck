@@ -12,6 +12,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   uploadMB: 1,
   wifiOnly: false,
   batchSize: 20,
+  maxHistoryLimit: 500,
 };
 
 let cachedDeviceId: string | null = null;

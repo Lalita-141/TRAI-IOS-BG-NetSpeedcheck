@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,14 +9,35 @@ import {
 } from 'react-native';
 import { Sample } from '../types';
 import { sampleStore } from '../services/sampleStore';
+import { exportSamplesAsCSV, exportSamplesAsJSON } from '../utils/exportUtils';
 
 interface HistoryViewProps {
   samples: Sample[];
   onRefresh: () => void;
+  onNavigateToSettings?: () => void;
 }
 
-export const HistoryView: React.FC<HistoryViewProps> = ({ samples, onRefresh }) => {
+export const HistoryView: React.FC<HistoryViewProps> = ({
+  samples,
+  onRefresh,
+}) => {
   const [selectedFilter, setSelectedFilter] = useState('ALL');
+  const [displayLimit, setDisplayLimit] = useState<number | 'ALL'>(50);
+  const [capacityInfo, setCapacityInfo] = useState<{
+    count: number;
+    maxLimit: number;
+    isFull: boolean;
+    usagePercent: number;
+  }>({
+    count: samples.length,
+    maxLimit: sampleStore.getMaxHistoryLimit(),
+    isFull: samples.length >= sampleStore.getMaxHistoryLimit(),
+    usagePercent: Math.min(100, Math.round((samples.length / sampleStore.getMaxHistoryLimit()) * 100)),
+  });
+
+  useEffect(() => {
+    sampleStore.getCapacityInfo().then(setCapacityInfo);
+  }, [samples]);
 
   // Compute aggregate statistics
   const summary = useMemo(() => {
@@ -48,27 +69,67 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ samples, onRefresh }) 
     };
   }, [samples]);
 
-  // Filter list
+  // Filter list by network/carrier
   const filteredSamples = useMemo(() => {
-    if (selectedFilter === 'ALL') return samples;
-    if (selectedFilter === 'WI-FI') return samples.filter(s => s.network === 'wifi');
-    if (selectedFilter === 'CELLULAR') return samples.filter(s => s.network === 'cellular');
-    if (selectedFilter === '5G') return samples.filter(s => s.radio?.includes('5G'));
-    if (selectedFilter === '4G') return samples.filter(s => s.radio?.includes('4G') || s.radio?.includes('LTE'));
-    if (selectedFilter === 'JIO') return samples.filter(s => s.carrier?.toLowerCase().includes('jio'));
-    if (selectedFilter === 'AIRTEL') return samples.filter(s => s.carrier?.toLowerCase().includes('airtel'));
-    if (selectedFilter === 'BSNL') return samples.filter(s => s.carrier?.toLowerCase().includes('bsnl'));
-    return samples;
-  }, [samples, selectedFilter]);
+    let result = samples;
+    if (selectedFilter === 'WI-FI') result = samples.filter(s => s.network === 'wifi');
+    else if (selectedFilter === 'CELLULAR') result = samples.filter(s => s.network === 'cellular');
+    else if (selectedFilter === '5G') result = samples.filter(s => s.radio?.includes('5G'));
+    else if (selectedFilter === '4G') result = samples.filter(s => s.radio?.includes('4G') || s.radio?.includes('LTE'));
+    else if (selectedFilter === 'JIO') result = samples.filter(s => s.carrier?.toLowerCase().includes('jio'));
+    else if (selectedFilter === 'AIRTEL') result = samples.filter(s => s.carrier?.toLowerCase().includes('airtel'));
+    else if (selectedFilter === 'BSNL') result = samples.filter(s => s.carrier?.toLowerCase().includes('bsnl'));
 
+    // Apply display limit
+    if (displayLimit !== 'ALL' && typeof displayLimit === 'number') {
+      return result.slice(0, displayLimit);
+    }
+    return result;
+  }, [samples, selectedFilter, displayLimit]);
+
+  // Handle Export Options
+  const handleExportPrompt = () => {
+    if (samples.length === 0) {
+      Alert.alert('No Data', 'No test samples available to export.');
+      return;
+    }
+
+    Alert.alert(
+      'Export Test History',
+      `Export ${samples.length} test records to your device or share:`,
+      [
+        {
+          text: '📊 Export as CSV (Spreadsheet)',
+          onPress: () => exportSamplesAsCSV(samples),
+        },
+        {
+          text: '📄 Export as JSON',
+          onPress: () => exportSamplesAsJSON(samples),
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
+  // Handle Clear History with Safe Export Prompt
   const handleClearHistory = () => {
+    if (samples.length === 0) return;
+
     Alert.alert(
       'Clear Sample History',
-      'Are you sure you want to delete all saved test history on this device?',
+      `You have ${samples.length} test records stored. Would you like to export a backup before clearing?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Clear All',
+          text: '📤 Export & Clear',
+          onPress: async () => {
+            await exportSamplesAsCSV(samples);
+            await sampleStore.clearAll();
+            onRefresh();
+          },
+        },
+        {
+          text: '🗑 Clear All',
           style: 'destructive',
           onPress: async () => {
             await sampleStore.clearAll();
@@ -85,6 +146,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ samples, onRefresh }) 
   };
 
   const filterChips = ['ALL', '5G', '4G', 'WI-FI', 'JIO', 'AIRTEL', 'BSNL'];
+  const limitOptions: (number | 'ALL')[] = [25, 50, 100, 250, 'ALL'];
 
   const renderItem = ({ item }: { item: Sample }) => {
     return (
@@ -169,6 +231,27 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ samples, onRefresh }) 
 
   return (
     <View style={styles.container}>
+      {/* Capacity & Auto-Depletion Banner */}
+      {capacityInfo.isFull ? (
+        <View style={styles.capacityWarningCard}>
+          <View style={styles.warningHeaderRow}>
+            <Text style={styles.warningTitle}>⚠️ Capacity Reached ({capacityInfo.count}/{capacityInfo.maxLimit})</Text>
+            <TouchableOpacity onPress={handleExportPrompt} style={styles.warningExportBtn}>
+              <Text style={styles.warningExportBtnText}>📤 Backup</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.warningDesc}>
+            New tests will auto-deplete (overwrite) the oldest entries. You can export a backup or raise capacity in Settings.
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.storageStatusStrip}>
+          <Text style={styles.storageStatusText}>
+            💾 Local Store: <Text style={styles.storageStatusHighlight}>{capacityInfo.count} / {capacityInfo.maxLimit}</Text> entries (auto-rotates when full)
+          </Text>
+        </View>
+      )}
+
       {/* Summary KPI Cards Strip */}
       <View style={styles.summaryCard}>
         <View style={styles.summaryItem}>
@@ -195,6 +278,34 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ samples, onRefresh }) 
           <Text style={[styles.summaryValue, { color: '#10B981' }]}>
             {summary.bestPing > 0 ? `${summary.bestPing}ms` : '--'}
           </Text>
+        </View>
+      </View>
+
+      {/* Display Limit & Visibility Bar */}
+      <View style={styles.controlSection}>
+        <View style={styles.displayLimitRow}>
+          <Text style={styles.controlLabel}>
+            VIEW: <Text style={styles.controlCounter}>Showing {filteredSamples.length} of {samples.length}</Text>
+          </Text>
+          <View style={styles.limitPillsContainer}>
+            {limitOptions.map(opt => (
+              <TouchableOpacity
+                key={String(opt)}
+                style={[
+                  styles.limitPill,
+                  displayLimit === opt && styles.limitPillActive,
+                ]}
+                onPress={() => setDisplayLimit(opt)}>
+                <Text
+                  style={[
+                    styles.limitPillText,
+                    displayLimit === opt && styles.limitPillTextActive,
+                  ]}>
+                  {opt === 'ALL' ? 'All' : opt}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
       </View>
 
@@ -244,16 +355,25 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ samples, onRefresh }) 
       )}
 
       {/* Actions footer */}
-      {samples.length > 0 && (
-        <View style={styles.actionRow}>
-          <TouchableOpacity style={styles.clearBtn} onPress={handleClearHistory}>
-            <Text style={styles.clearBtnText}>🗑 Clear Log</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.refreshBtn} onPress={onRefresh}>
-            <Text style={styles.refreshBtnText}>🔄 Refresh</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      <View style={styles.actionRow}>
+        <TouchableOpacity
+          style={[styles.exportBtn, samples.length === 0 && styles.btnDisabled]}
+          onPress={handleExportPrompt}
+          disabled={samples.length === 0}>
+          <Text style={styles.exportBtnText}>📤 Export CSV/JSON</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.clearBtn, samples.length === 0 && styles.btnDisabled]}
+          onPress={handleClearHistory}
+          disabled={samples.length === 0}>
+          <Text style={styles.clearBtnText}>🗑 Clear Log</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.refreshBtn} onPress={onRefresh}>
+          <Text style={styles.refreshBtnText}>🔄 Refresh</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 };
@@ -263,14 +383,64 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0B0F19',
   },
+  capacityWarningCard: {
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+    borderRadius: 12,
+    marginHorizontal: 16,
+    marginTop: 8,
+    padding: 10,
+  },
+  warningHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  warningTitle: {
+    color: '#F59E0B',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  warningExportBtn: {
+    backgroundColor: '#F59E0B',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  warningExportBtnText: {
+    color: '#0F172A',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  warningDesc: {
+    color: '#E2E8F0',
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  storageStatusStrip: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 2,
+  },
+  storageStatusText: {
+    color: '#64748B',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  storageStatusHighlight: {
+    color: '#38BDF8',
+    fontWeight: '700',
+  },
   summaryCard: {
     flexDirection: 'row',
     backgroundColor: '#131B2E',
     marginHorizontal: 16,
-    marginTop: 10,
-    marginBottom: 10,
+    marginTop: 6,
+    marginBottom: 8,
     borderRadius: 14,
-    paddingVertical: 12,
+    paddingVertical: 10,
     paddingHorizontal: 8,
     borderWidth: 1,
     borderColor: '#1E293B',
@@ -298,6 +468,54 @@ const styles = StyleSheet.create({
     height: 24,
     backgroundColor: '#1E293B',
   },
+  controlSection: {
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
+  displayLimitRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#131B2E',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#1E293B',
+  },
+  controlLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#94A3B8',
+  },
+  controlCounter: {
+    color: '#38BDF8',
+    fontWeight: '600',
+  },
+  limitPillsContainer: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  limitPill: {
+    backgroundColor: '#1E293B',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  limitPillActive: {
+    backgroundColor: '#38BDF8',
+    borderColor: '#38BDF8',
+  },
+  limitPillText: {
+    color: '#94A3B8',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  limitPillTextActive: {
+    color: '#0F172A',
+  },
   filterBar: {
     marginBottom: 8,
   },
@@ -307,8 +525,8 @@ const styles = StyleSheet.create({
   },
   filterChip: {
     backgroundColor: '#1E293B',
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: '#334155',
@@ -319,7 +537,7 @@ const styles = StyleSheet.create({
   },
   filterChipText: {
     color: '#94A3B8',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
   },
   filterChipTextActive: {
@@ -450,32 +668,62 @@ const styles = StyleSheet.create({
   actionRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     backgroundColor: '#0B0F19',
     borderTopWidth: 1,
     borderTopColor: '#1E293B',
+    gap: 8,
+  },
+  exportBtn: {
+    flex: 1.2,
+    paddingVertical: 9,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  exportBtnText: {
+    color: '#38BDF8',
+    fontSize: 11,
+    fontWeight: '800',
   },
   clearBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
+    flex: 0.9,
+    paddingVertical: 9,
+    paddingHorizontal: 8,
     borderRadius: 8,
     backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   clearBtnText: {
     color: '#EF4444',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
   },
   refreshBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
+    flex: 0.9,
+    paddingVertical: 9,
+    paddingHorizontal: 8,
     borderRadius: 8,
     backgroundColor: '#1E293B',
+    borderWidth: 1,
+    borderColor: '#334155',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   refreshBtnText: {
-    color: '#38BDF8',
-    fontSize: 12,
+    color: '#F8FAFC',
+    fontSize: 11,
     fontWeight: '700',
+  },
+  btnDisabled: {
+    opacity: 0.4,
   },
 });

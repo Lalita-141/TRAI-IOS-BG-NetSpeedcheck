@@ -25,7 +25,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) 
   }, [visible]);
 
   const loadHistory = async () => {
-    const list = await sampleStore.getHistory(100);
+    const list = await sampleStore.getHistory(0);
     setSamples(list);
   };
 

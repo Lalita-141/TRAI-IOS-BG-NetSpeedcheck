@@ -12,6 +12,7 @@ import {
 import { AppConfig } from '../types';
 import { getConfig, saveConfig, getDeviceId } from '../config';
 import { sampleStore } from '../services/sampleStore';
+import { exportSamplesAsCSV, exportSamplesAsJSON } from '../utils/exportUtils';
 
 interface SettingsViewProps {
   onConfigChanged: (config: AppConfig) => void;
@@ -23,8 +24,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
   const [downloadMB, setDownloadMB] = useState(2);
   const [uploadMB, setUploadMB] = useState(1);
   const [wifiOnly, setWifiOnly] = useState(false);
+  const [maxHistoryLimit, setMaxHistoryLimit] = useState(500);
   const [deviceId, setDeviceId] = useState('');
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [sampleCount, setSampleCount] = useState(0);
 
   useEffect(() => {
     load();
@@ -33,12 +36,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
   const load = async () => {
     const config = await getConfig();
     const id = await getDeviceId();
+    const capacity = await sampleStore.getCapacityInfo();
     setServerUrl(config.serverUrl);
     setIntervalSec(config.testIntervalSeconds);
     setDownloadMB(config.downloadMB);
     setUploadMB(config.uploadMB);
     setWifiOnly(config.wifiOnly);
+    setMaxHistoryLimit(config.maxHistoryLimit || 500);
     setDeviceId(id);
+    setSampleCount(capacity.count);
   };
 
   const handleSave = async () => {
@@ -47,12 +53,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
       return;
     }
 
+    sampleStore.setMaxHistoryLimit(maxHistoryLimit);
+
     const updated = await saveConfig({
       serverUrl: serverUrl.trim(),
       testIntervalSeconds: intervalSec,
       downloadMB,
       uploadMB,
       wifiOnly,
+      maxHistoryLimit,
     });
 
     onConfigChanged(updated);
@@ -60,18 +69,39 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
     setTimeout(() => setSavedSuccess(false), 2500);
   };
 
-  const handleClearData = () => {
+  const handleExportCSV = async () => {
+    const samples = await sampleStore.getHistory(0);
+    await exportSamplesAsCSV(samples);
+  };
+
+  const handleExportJSON = async () => {
+    const samples = await sampleStore.getHistory(0);
+    await exportSamplesAsJSON(samples);
+  };
+
+  const handleClearData = async () => {
+    const samples = await sampleStore.getHistory(0);
     Alert.alert(
       'Clear All Local Data',
-      'Are you sure you want to clear all queued samples and history?',
+      `You have ${samples.length} test records stored. Would you like to backup/export before clearing?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Clear',
+          text: '📤 Export & Clear',
+          onPress: async () => {
+            await exportSamplesAsCSV(samples);
+            await sampleStore.clearAll();
+            setSampleCount(0);
+            Alert.alert('Success', 'Exported and cleared all local logs.');
+          },
+        },
+        {
+          text: '🗑 Clear All',
           style: 'destructive',
           onPress: async () => {
             await sampleStore.clearAll();
-            Alert.alert('Success', 'Local queue and history cleared');
+            setSampleCount(0);
+            Alert.alert('Success', 'Local queue and history cleared.');
           },
         },
       ]
@@ -87,6 +117,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
   ];
 
   const payloadOptions = [1, 2, 5, 10];
+  const historyLimitOptions = [100, 250, 500, 1000, 2500, 5000];
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -104,7 +135,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
           style={styles.input}
           value={serverUrl}
           onChangeText={setServerUrl}
-          placeholder="http://172.20.1.86:8000"
+          placeholder="https://140-245-3-81.sslip.io"
           placeholderTextColor="#475569"
           autoCapitalize="none"
           autoCorrect={false}
@@ -112,13 +143,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
         <View style={styles.presetRow}>
           <TouchableOpacity
             style={styles.presetBtn}
-            onPress={() => setServerUrl('http://172.20.1.86:8000')}>
-            <Text style={styles.presetBtnText}>172.20.1.86:8000 (Mac LAN)</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.presetBtn}
-            onPress={() => setServerUrl('http://127.0.0.1:8000')}>
-            <Text style={styles.presetBtnText}>localhost:8000</Text>
+            onPress={() => setServerUrl('https://140-245-3-81.sslip.io')}>
+            <Text style={styles.presetBtnText}>140-245-3-81.sslip.io (Oracle Cloud)</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -143,6 +169,31 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
             </TouchableOpacity>
           ))}
         </View>
+      </View>
+
+      {/* History Storage Retention Limit */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>History Storage & Auto-Depletion</Text>
+        <Text style={styles.label}>Max Local Log Capacity (Entries)</Text>
+        <View style={styles.buttonGroup}>
+          {historyLimitOptions.map(limit => (
+            <TouchableOpacity
+              key={limit}
+              style={[styles.groupBtn, maxHistoryLimit === limit && styles.groupBtnActive]}
+              onPress={() => setMaxHistoryLimit(limit)}>
+              <Text
+                style={[
+                  styles.groupBtnText,
+                  maxHistoryLimit === limit && styles.groupBtnTextActive,
+                ]}>
+                {limit.toLocaleString()}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <Text style={styles.helperText}>
+          Currently holding {sampleCount} records. Once storage reaches this cap, older entries automatically auto-deplete (rotate out) to prevent memory overload.
+        </Text>
       </View>
 
       {/* Test Payloads */}
@@ -197,6 +248,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
           trackColor={{ false: '#334155', true: '#06B6D4' }}
           thumbColor="#FFFFFF"
         />
+      </View>
+
+      {/* Export & Data Management */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Data Export & Backup</Text>
+        <Text style={styles.helperText}>Export all local speed test logs for external analysis:</Text>
+        <View style={styles.exportBtnRow}>
+          <TouchableOpacity style={styles.exportActionBtn} onPress={handleExportCSV}>
+            <Text style={styles.exportActionBtnText}>📊 Export as CSV</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.exportActionBtn} onPress={handleExportJSON}>
+            <Text style={styles.exportActionBtnText}>📄 Export as JSON</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Device Info */}
@@ -267,7 +332,8 @@ const styles = StyleSheet.create({
   helperText: {
     fontSize: 12,
     color: '#64748B',
-    marginTop: 2,
+    marginTop: 6,
+    lineHeight: 16,
   },
   input: {
     backgroundColor: '#1E293B',
@@ -304,7 +370,7 @@ const styles = StyleSheet.create({
   },
   groupBtn: {
     flex: 1,
-    minWidth: '22%',
+    minWidth: '28%',
     backgroundColor: '#1E293B',
     paddingVertical: 10,
     alignItems: 'center',
@@ -324,6 +390,25 @@ const styles = StyleSheet.create({
   groupBtnTextActive: {
     color: '#0F172A',
     fontWeight: '700',
+  },
+  exportBtnRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 10,
+  },
+  exportActionBtn: {
+    flex: 1,
+    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.3)',
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  exportActionBtnText: {
+    color: '#38BDF8',
+    fontWeight: '700',
+    fontSize: 12,
   },
   switchRow: {
     flexDirection: 'row',

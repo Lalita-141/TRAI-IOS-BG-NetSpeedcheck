@@ -26,6 +26,7 @@ export interface AppConfig {
   wifiOnly: boolean;
   batchSize: number;
   deviceId?: string;
+  maxHistoryLimit?: number;
 }
 
 export type TestPhase = 'idle' | 'ping' | 'download' | 'upload' | 'saving' | 'complete' | 'error';
