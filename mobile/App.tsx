@@ -127,7 +127,7 @@ export default function App() {
           <View>
             <Text style={styles.appTitle}>TRAI SPEED MONITOR</Text>
             <Text style={styles.serverSubtitle} numberOfLines={1}>
-              {config?.serverUrl || 'http://172.20.10.10:8000'}
+              {config?.serverUrl || 'https://140-245-3-81.sslip.io'}
             </Text>
           </View>
         </View>

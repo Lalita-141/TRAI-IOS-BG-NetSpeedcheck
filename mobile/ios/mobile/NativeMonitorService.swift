@@ -14,7 +14,7 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
     private var isTesting = false
     private var isMonitoring = false
     private var intervalSeconds: TimeInterval = 10.0 // 10s for rapid background & killed state verification
-    private var serverUrlString: String = "http://172.20.10.10:8000"
+    private var serverUrlString: String = "https://140-245-3-81.sslip.io"
     
     private override init() {
         super.init()

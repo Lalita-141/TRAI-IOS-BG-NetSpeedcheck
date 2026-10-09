@@ -212,13 +212,21 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
 
         <MetricCard
           title="Network & TSP"
-          value={last?.carrier ? last.carrier : (last?.network ? last.network.toUpperCase() : 'WIFI')}
-          badge={last?.radio || (last?.network === 'wifi' ? 'Wi-Fi' : undefined)}
+          value={
+            last?.carrier && last.carrier !== '--' && last.carrier !== 'wifi'
+              ? last.carrier
+              : (last?.network === 'wifi' ? 'Wi-Fi' : (last?.radio || 'Cellular'))
+          }
+          badge={last?.network === 'wifi' ? 'Wi-Fi' : (last?.radio || 'Cellular')}
           accentColor="#10B981"
           subtitle={
-            last?.carrier
-              ? `${last.network?.toUpperCase() || 'NET'} • ${last.radio || 'Cellular'}`
-              : (last?.radio ? `Radio: ${last.radio}` : 'Local Link')
+            last?.network === 'wifi'
+              ? (last?.carrier && last.carrier !== '--' && last.carrier !== 'Wi-Fi'
+                  ? `${last.carrier} • Wi-Fi`
+                  : 'Broadband / WLAN')
+              : (last?.carrier && last.carrier !== '--'
+                  ? `${last.carrier} • ${last?.radio || 'Mobile'}`
+                  : `${last?.radio || 'Cellular'} Network`)
           }
         />
       </View>

@@ -6,7 +6,7 @@ const STORAGE_KEY_CONFIG = '@speedmonitor_config';
 const STORAGE_KEY_DEVICE_ID = '@speedmonitor_device_id';
 
 export const DEFAULT_CONFIG: AppConfig = {
-  serverUrl: 'http://172.20.10.10:8000', // Mac Hotspot IP
+  serverUrl: 'https://140-245-3-81.sslip.io', // Production HTTPS Backend
   testIntervalSeconds: 10, // 10 seconds for rapid background & killed state verification
   downloadMB: 2,
   uploadMB: 1,

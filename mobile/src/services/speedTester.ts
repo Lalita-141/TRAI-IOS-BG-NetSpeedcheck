@@ -13,6 +13,62 @@ export interface SpeedResult {
   carrier: string | null;
 }
 
+let cachedIsp: { isp: string; timestamp: number } | null = null;
+
+export async function resolvePublicISP(forceFresh: boolean = false): Promise<string | null> {
+  const now = Date.now();
+  if (!forceFresh && cachedIsp && now - cachedIsp.timestamp < 30 * 1000) {
+    return cachedIsp.isp;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    const res = await fetch(`https://ipwho.is/?fields=connection,success&_t=${Date.now()}`, {
+      headers: { 'Cache-Control': 'no-cache, no-store' },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.success && data?.connection) {
+        const rawIsp = (data.connection.isp || data.connection.org || '').trim();
+        let cleaned = rawIsp;
+
+        if (/reliance jio|jio/i.test(rawIsp)) {
+          cleaned = 'Jio';
+        } else if (/bharti airtel|airtel/i.test(rawIsp)) {
+          cleaned = 'Airtel';
+        } else if (/bsnl|bharat sanchar/i.test(rawIsp)) {
+          cleaned = 'BSNL';
+        } else if (/vodafone|idea|vi /i.test(rawIsp)) {
+          cleaned = 'Vi';
+        } else if (/atria|act fibernet/i.test(rawIsp)) {
+          cleaned = 'ACT Fibernet';
+        } else if (/tata/i.test(rawIsp)) {
+          cleaned = 'Tata Play Fiber';
+        } else if (/hathway/i.test(rawIsp)) {
+          cleaned = 'Hathway';
+        } else if (/excitel/i.test(rawIsp)) {
+          cleaned = 'Excitel';
+        } else if (rawIsp.length > 20) {
+          cleaned = rawIsp.substring(0, 20);
+        }
+
+        if (cleaned) {
+          cachedIsp = { isp: cleaned, timestamp: now };
+          return cleaned;
+        }
+      }
+    }
+  } catch (err) {
+    // Non-blocking fallback
+  }
+  return null;
+}
+
 export class SpeedTester {
   /**
    * Measures latency, jitter, and packet loss using 5 round-trip HTTP probes (TRAI QoS Standard)
@@ -147,10 +203,7 @@ export class SpeedTester {
   }
 
   /**
-   * Obtains current network type and radio technology
-   */
-  /**
-   * Obtains current network type, cellular carrier name, and radio technology
+   * Obtains current network type, cellular carrier name or broadband ISP, and radio technology
    */
   async getNetworkContext(): Promise<{
     network: string;
@@ -164,20 +217,7 @@ export class SpeedTester {
     let isConnected = true;
 
     try {
-      // 1. Try Native Telephony Module (iOS CoreTelephony)
-      if (NativeModules.TelephonyModule && NativeModules.TelephonyModule.getCellularInfo) {
-        try {
-          const telInfo = await NativeModules.TelephonyModule.getCellularInfo();
-          if (telInfo) {
-            if (telInfo.carrier) carrier = telInfo.carrier;
-            if (telInfo.radio) radio = telInfo.radio;
-          }
-        } catch (telErr) {
-          console.warn('Native TelephonyModule query failed:', telErr);
-        }
-      }
-
-      // 2. Query NetInfo for connection interface type and fallback details
+      // 1. Query NetInfo for active connection interface type
       const state = await NetInfo.fetch();
       isConnected = !!state.isConnected;
 
@@ -185,17 +225,42 @@ export class SpeedTester {
         network = 'none';
       } else if (state.type === NetInfoStateType.wifi) {
         network = 'wifi';
+        radio = 'Wi-Fi';
+        // Resolve ISP / Provider of the active Wi-Fi or Hotspot gateway (bypass internal SIM)
+        const isp = await resolvePublicISP(true);
+        carrier = isp || 'Wi-Fi';
       } else if (state.type === NetInfoStateType.cellular) {
         network = 'cellular';
+
+        // Query Native Telephony Module (iOS CoreTelephony SIM)
+        if (NativeModules.TelephonyModule && NativeModules.TelephonyModule.getCellularInfo) {
+          try {
+            const telInfo = await NativeModules.TelephonyModule.getCellularInfo();
+            if (telInfo) {
+              if (telInfo.carrier && telInfo.carrier !== '--') carrier = telInfo.carrier;
+              if (telInfo.radio) radio = telInfo.radio;
+            }
+          } catch (telErr) {
+            console.warn('Native TelephonyModule query failed:', telErr);
+          }
+        }
+
         const details = state.details as { cellularGeneration?: string; carrier?: string } | null;
-        if (!carrier && details?.carrier) {
+        if ((!carrier || carrier === '--') && details?.carrier) {
           carrier = details.carrier;
         }
         if (!radio && details?.cellularGeneration) {
           radio = details.cellularGeneration.toUpperCase();
         }
+        if (!carrier || carrier === '--') {
+          const isp = await resolvePublicISP(true);
+          carrier = isp || (radio ? `${radio} Mobile` : 'Cellular');
+        }
       } else if (state.type === NetInfoStateType.ethernet) {
         network = 'ethernet';
+        radio = 'Ethernet';
+        const isp = await resolvePublicISP(true);
+        carrier = isp || 'LAN / Ethernet';
       }
     } catch (e) {
       console.warn('Failed to get network state:', e);
@@ -203,8 +268,8 @@ export class SpeedTester {
 
     return {
       network,
-      radio,
-      carrier,
+      radio: radio || (network === 'wifi' ? 'Wi-Fi' : 'Cellular'),
+      carrier: carrier && carrier !== '--' ? carrier : (network === 'wifi' ? 'Wi-Fi' : 'Cellular'),
       isConnected,
     };
   }

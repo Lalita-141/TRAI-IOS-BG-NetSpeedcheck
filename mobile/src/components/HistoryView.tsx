@@ -93,10 +93,18 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ samples, onRefresh }) 
           <View style={styles.badgeRow}>
             <View style={styles.carrierBadge}>
               <Text style={styles.carrierBadgeText}>
-                {item.carrier || (item.network === 'wifi' ? 'Wi-Fi' : 'Cellular')}
+                {item.carrier && item.carrier !== '--' && item.carrier !== 'wifi'
+                  ? item.carrier
+                  : item.network === 'wifi'
+                  ? 'Wi-Fi'
+                  : item.radio || 'Cellular'}
               </Text>
             </View>
-            {item.radio ? (
+            {item.network === 'wifi' && item.carrier && item.carrier !== 'Wi-Fi' ? (
+              <View style={[styles.radioBadge, { backgroundColor: 'rgba(6, 182, 212, 0.15)' }]}>
+                <Text style={[styles.radioBadgeText, { color: '#06B6D4' }]}>Wi-Fi</Text>
+              </View>
+            ) : item.radio && item.network !== 'wifi' ? (
               <View style={styles.radioBadge}>
                 <Text style={styles.radioBadgeText}>{item.radio}</Text>
               </View>
