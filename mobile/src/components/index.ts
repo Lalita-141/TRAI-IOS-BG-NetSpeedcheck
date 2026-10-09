@@ -6,3 +6,4 @@ export * from './SpeedGauge';
 export * from './MetricCard';
 export * from './HistoryModal';
 export * from './SettingsModal';
+export * from './Icons';

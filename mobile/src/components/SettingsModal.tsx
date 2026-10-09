@@ -86,7 +86,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const intervalOptions = [
-    { label: '30s (Test)', value: 30 },
+    { label: '30s', value: 30 },
     { label: '1m', value: 60 },
     { label: '5m', value: 300 },
     { label: '15m', value: 900 },
@@ -114,23 +114,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 style={styles.input}
                 value={serverUrl}
                 onChangeText={setServerUrl}
-                placeholder="http://192.168.1.10:8000"
-                placeholderTextColor="#475569"
+                placeholder="https://140-245-3-81.sslip.io"
+                placeholderTextColor="#94A3B8"
                 autoCapitalize="none"
                 autoCorrect={false}
               />
-              <View style={styles.presetRow}>
-                <TouchableOpacity
-                  style={styles.presetBtn}
-                  onPress={() => setServerUrl('http://172.20.1.86:8000')}>
-                  <Text style={styles.presetBtnText}>172.20.1.86:8000 (Mac LAN)</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.presetBtn}
-                  onPress={() => setServerUrl('http://127.0.0.1:8000')}>
-                  <Text style={styles.presetBtnText}>localhost</Text>
-                </TouchableOpacity>
-              </View>
             </View>
 
             {/* Interval */}
@@ -199,13 +187,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             {/* Wi-Fi Only */}
             <View style={styles.switchRow}>
               <View>
-                <Text style={styles.label}>Wi-Fi Only Mode</Text>
-                <Text style={styles.helperText}>Prevents cellular data usage during tests</Text>
+                <Text style={styles.switchTitle}>Wi-Fi Only Mode</Text>
+                <Text style={styles.helperText}>Skips cellular mobile data</Text>
               </View>
               <Switch
                 value={wifiOnly}
                 onValueChange={setWifiOnly}
-                trackColor={{ false: '#334155', true: '#06B6D4' }}
+                trackColor={{ false: '#E2E8F0', true: '#00A389' }}
                 thumbColor="#FFFFFF"
               />
             </View>
@@ -216,7 +204,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <Text style={styles.deviceIdText}>{deviceId || 'Loading...'}</Text>
             </View>
 
-            {/* Reset / Data Wipe */}
+            {/* Reset */}
             <TouchableOpacity style={styles.clearBtn} onPress={handleClearData}>
               <Text style={styles.clearBtnText}>Clear Local Queue & History</Text>
             </TouchableOpacity>
@@ -237,17 +225,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    backgroundColor: 'rgba(15, 23, 42, 0.4)',
     justifyContent: 'flex-end',
   },
   container: {
-    backgroundColor: '#0F172A',
+    backgroundColor: '#F4F6FA',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     maxHeight: '90%',
     paddingBottom: 24,
-    borderWidth: 1,
-    borderColor: '#1E293B',
   },
   header: {
     flexDirection: 'row',
@@ -256,71 +242,60 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 18,
     paddingBottom: 14,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     borderBottomWidth: 1,
-    borderBottomColor: '#1E293B',
+    borderBottomColor: '#E8EDF2',
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
-    color: '#F8FAFC',
+    color: '#0F172A',
   },
   closeBtn: {
     padding: 6,
   },
   closeBtnText: {
-    color: '#94A3B8',
+    color: '#64748B',
     fontSize: 18,
     fontWeight: '700',
   },
   body: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
   },
   bodyContent: {
     paddingVertical: 14,
   },
   section: {
-    marginBottom: 18,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E8EDF2',
   },
   label: {
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '600',
-    color: '#94A3B8',
-    marginBottom: 8,
+    color: '#64748B',
+    marginBottom: 6,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   helperText: {
-    fontSize: 12,
-    color: '#64748B',
+    fontSize: 11,
+    color: '#94A3B8',
     marginTop: 2,
   },
   input: {
-    backgroundColor: '#1E293B',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    color: '#F8FAFC',
-    fontSize: 15,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#0F172A',
+    fontSize: 14,
     borderWidth: 1,
-    borderColor: '#334155',
-  },
-  presetRow: {
-    flexDirection: 'row',
-    marginTop: 8,
-    gap: 8,
-  },
-  presetBtn: {
-    backgroundColor: '#1E293B',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  presetBtnText: {
-    color: '#38BDF8',
-    fontSize: 12,
-    fontWeight: '600',
+    borderColor: '#CBD5E1',
   },
   buttonGroup: {
     flexDirection: 'row',
@@ -330,68 +305,77 @@ const styles = StyleSheet.create({
   groupBtn: {
     flex: 1,
     minWidth: '22%',
-    backgroundColor: '#1E293B',
-    paddingVertical: 10,
+    backgroundColor: '#F8FAFC',
+    paddingVertical: 8,
     alignItems: 'center',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#E2E8F0',
   },
   groupBtnActive: {
-    backgroundColor: '#06B6D4',
-    borderColor: '#06B6D4',
+    backgroundColor: '#00A389',
+    borderColor: '#00A389',
   },
   groupBtnText: {
-    color: '#94A3B8',
+    color: '#64748B',
     fontWeight: '600',
-    fontSize: 13,
+    fontSize: 12,
   },
   groupBtnTextActive: {
-    color: '#0F172A',
+    color: '#FFFFFF',
     fontWeight: '700',
   },
   switchRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginVertical: 12,
-    paddingVertical: 8,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E8EDF2',
+  },
+  switchTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
   },
   deviceIdText: {
     color: '#64748B',
     fontFamily: 'Courier',
     fontSize: 12,
-    backgroundColor: '#1E293B',
-    padding: 10,
-    borderRadius: 8,
+    backgroundColor: '#F8FAFC',
+    padding: 8,
+    borderRadius: 6,
   },
   clearBtn: {
-    marginTop: 10,
+    marginTop: 6,
     paddingVertical: 12,
     alignItems: 'center',
-    borderRadius: 8,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#EF4444',
+    borderColor: '#FCA5A5',
+    backgroundColor: '#FEF2F2',
   },
   clearBtnText: {
     color: '#EF4444',
     fontWeight: '600',
-    fontSize: 13,
+    fontSize: 12,
   },
   footer: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
+    paddingHorizontal: 16,
+    paddingTop: 10,
   },
   saveBtn: {
-    backgroundColor: '#06B6D4',
+    backgroundColor: '#00A389',
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
   },
   saveBtnText: {
-    color: '#0F172A',
-    fontWeight: '800',
-    fontSize: 16,
-    letterSpacing: 0.5,
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 15,
   },
 });

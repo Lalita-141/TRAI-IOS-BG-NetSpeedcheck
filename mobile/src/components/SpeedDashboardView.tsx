@@ -12,27 +12,36 @@ import { AppConfig } from '../types';
 import { SpeedGauge } from './SpeedGauge';
 import { MetricCard } from './MetricCard';
 import { MonitorStatus } from '../services/monitorService';
+import {
+  DownloadIcon,
+  UploadIcon,
+  ClockIcon,
+  WaveformIcon,
+  ShieldIcon,
+  AntennaIcon,
+  PinIcon,
+  ChevronRightIcon,
+  PlayIcon,
+  StopIcon,
+  GaugeIcon,
+} from './Icons';
 
 interface SpeedDashboardViewProps {
   config: AppConfig | null;
   status: MonitorStatus;
   refreshing: boolean;
-  isSyncing: boolean;
   onRefresh: () => void;
   onToggleMonitoring: () => void;
   onTestNow: () => void;
-  onSyncPending: () => void;
 }
 
 export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
   config,
   status,
   refreshing,
-  isSyncing,
   onRefresh,
   onToggleMonitoring,
   onTestNow,
-  onSyncPending,
 }) => {
   const last = status.lastSample;
   const progress = status.currentProgress;
@@ -67,54 +76,30 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   };
 
+  const carrierName =
+    last?.carrier && last.carrier !== '--' && last.carrier !== 'wifi'
+      ? last.carrier
+      : last?.network === 'wifi'
+      ? 'Wi-Fi'
+      : last?.radio || 'Cellular';
+
+  const networkBadge = last?.network === 'wifi' ? 'Wi-Fi' : last?.radio || 'Mobile';
+
   return (
     <ScrollView
       style={styles.scrollView}
       contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
           onRefresh={onRefresh}
-          tintColor="#06B6D4"
-          colors={['#06B6D4']}
+          tintColor="#00A389"
+          colors={['#00A389']}
         />
       }>
-      {/* Status Bar Banner */}
-      <View style={styles.statusBanner}>
-        <View style={styles.statusIndicatorRow}>
-          <View
-            style={[
-              styles.statusDot,
-              { backgroundColor: status.isRunning ? '#10B981' : '#64748B' },
-            ]}
-          />
-          <Text style={styles.statusText}>
-            {status.isRunning ? 'MONITORING ACTIVE' : 'MONITORING IDLE'}
-          </Text>
-        </View>
-
-        {status.pendingCount > 0 ? (
-          <TouchableOpacity
-            style={styles.pendingBadge}
-            onPress={onSyncPending}
-            disabled={isSyncing}>
-            {isSyncing ? (
-              <ActivityIndicator size="small" color="#F59E0B" />
-            ) : (
-              <Text style={styles.pendingBadgeText}>
-                {status.pendingCount} Pending ⬆
-              </Text>
-            )}
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.syncedBadge}>
-            <Text style={styles.syncedBadgeText}>All Synced ✓</Text>
-          </View>
-        )}
-      </View>
-
-      {/* Speed Gauge Display */}
-      <View style={styles.gaugeContainer}>
+      {/* Top Gauge Card (Option A Theme) */}
+      <View style={styles.gaugeCard}>
         <SpeedGauge
           value={gaugeValue}
           maxValue={gaugeMax}
@@ -131,140 +116,164 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
               <View
                 style={[
                   styles.progressBarFill,
-                  { width: `${progress.progressPercent || 10}%` },
+                  { width: `${progress.progressPercent || 15}%` },
                 ]}
               />
             </View>
             <Text style={styles.progressMessage}>{progress.message}</Text>
           </View>
         ) : null}
+
+        {/* Action Buttons Row */}
+        <View style={styles.actionButtonsRow}>
+          <TouchableOpacity
+            style={[
+              styles.startMonitoringBtn,
+              status.isRunning ? styles.stopMonitoringBtn : null,
+            ]}
+            onPress={onToggleMonitoring}
+            activeOpacity={0.85}>
+            {status.isRunning ? (
+              <StopIcon size={15} color="#FFFFFF" />
+            ) : (
+              <PlayIcon size={14} color="#FFFFFF" />
+            )}
+            <Text style={styles.startBtnText}>
+              {status.isRunning ? 'Stop Monitoring' : 'Start Monitoring'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.testNowBtn, status.isTesting && styles.btnDisabled]}
+            onPress={onTestNow}
+            disabled={status.isTesting}
+            activeOpacity={0.85}>
+            {status.isTesting ? (
+              <ActivityIndicator size="small" color="#00A389" />
+            ) : (
+              <>
+                <GaugeIcon size={16} color="#1E293B" />
+                <Text style={styles.testNowBtnText}>Test Now</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {/* Primary Action Buttons */}
-      <View style={styles.controlsRow}>
-        <TouchableOpacity
-          style={[
-            styles.primaryBtn,
-            status.isRunning ? styles.stopBtn : styles.startBtn,
-          ]}
-          onPress={onToggleMonitoring}
-          activeOpacity={0.8}>
-          <Text style={styles.primaryBtnText}>
-            {status.isRunning ? 'STOP MONITOR' : 'START MONITOR'}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.secondaryBtn, status.isTesting && styles.btnDisabled]}
-          onPress={onTestNow}
-          disabled={status.isTesting}
-          activeOpacity={0.8}>
-          {status.isTesting ? (
-            <ActivityIndicator size="small" color="#06B6D4" />
-          ) : (
-            <Text style={styles.secondaryBtnText}>TEST NOW</Text>
-          )}
-        </TouchableOpacity>
+      {/* QoS Section Heading */}
+      <View style={styles.sectionHeadingRow}>
+        <Text style={styles.sectionHeading}>Speed & Quality of Service (QoS)</Text>
       </View>
 
-      {/* Telemetry Metrics Grid (TRAI QoS Compliant) */}
-      <Text style={styles.sectionHeading}>SPEED & QUALITY OF SERVICE (QoS)</Text>
+      {/* QoS 2-Column Metrics Grid */}
       <View style={styles.metricsGrid}>
         <MetricCard
           title="Download"
           value={last?.down_mbps != null ? last.down_mbps.toFixed(1) : '--'}
           unit="Mbps"
-          accentColor="#06B6D4"
+          accentColor="#0284C7"
+          iconBgColor="#E0F2FE"
           subtitle="Throughput"
+          icon={<DownloadIcon size={16} color="#0284C7" />}
         />
 
         <MetricCard
           title="Upload"
           value={last?.up_mbps != null ? last.up_mbps.toFixed(1) : '--'}
           unit="Mbps"
-          accentColor="#8B5CF6"
+          accentColor="#7C3AED"
+          iconBgColor="#EDE9FE"
           subtitle="Throughput"
+          icon={<UploadIcon size={16} color="#7C3AED" />}
         />
 
         <MetricCard
           title="Latency"
           value={last?.latency_ms != null ? Math.round(last.latency_ms) : '--'}
           unit="ms"
-          accentColor="#F59E0B"
+          accentColor="#D97706"
+          iconBgColor="#FEF3C7"
           subtitle="Ping"
+          icon={<ClockIcon size={16} color="#D97706" />}
         />
 
         <MetricCard
           title="Jitter"
           value={last?.jitter_ms != null ? last.jitter_ms.toFixed(1) : '--'}
           unit="ms"
-          accentColor="#EC4899"
+          accentColor="#DB2777"
+          iconBgColor="#FCE7F3"
           subtitle="Variance"
+          icon={<WaveformIcon size={16} color="#DB2777" />}
         />
 
         <MetricCard
           title="Packet Loss"
           value={last?.packet_loss_pct != null ? `${last.packet_loss_pct}` : '0'}
           unit="%"
-          accentColor={last?.packet_loss_pct && last.packet_loss_pct > 0 ? '#EF4444' : '#10B981'}
+          accentColor={last?.packet_loss_pct && last.packet_loss_pct > 0 ? '#EF4444' : '#059669'}
+          iconBgColor={last?.packet_loss_pct && last.packet_loss_pct > 0 ? '#FEE2E2' : '#D1FAE5'}
           subtitle="Stability"
+          icon={
+            <ShieldIcon
+              size={16}
+              color={last?.packet_loss_pct && last.packet_loss_pct > 0 ? '#EF4444' : '#059669'}
+            />
+          }
         />
 
         <MetricCard
-          title="Network & TSP"
-          value={
-            last?.carrier && last.carrier !== '--' && last.carrier !== 'wifi'
-              ? last.carrier
-              : (last?.network === 'wifi' ? 'Wi-Fi' : (last?.radio || 'Cellular'))
-          }
-          badge={last?.network === 'wifi' ? 'Wi-Fi' : (last?.radio || 'Cellular')}
-          accentColor="#10B981"
+          title="Network & ISP"
+          value={carrierName}
+          badge={networkBadge}
+          accentColor="#00A389"
+          iconBgColor="#CCFBF1"
           subtitle={
             last?.network === 'wifi'
-              ? (last?.carrier && last.carrier !== '--' && last.carrier !== 'Wi-Fi'
-                  ? `${last.carrier} • Wi-Fi`
-                  : 'Broadband / WLAN')
-              : (last?.carrier && last.carrier !== '--'
-                  ? `${last.carrier} • ${last?.radio || 'Mobile'}`
-                  : `${last?.radio || 'Cellular'} Network`)
+              ? `${carrierName} • Wi-Fi`
+              : `${carrierName} • ${last?.radio || 'Cellular'}`
           }
+          icon={<AntennaIcon size={16} color="#00A389" />}
         />
       </View>
 
-      {/* Location & Device Environment */}
-      <View style={styles.infoCard}>
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>GPS Coordinates</Text>
-          <Text style={styles.infoValue}>
-            {last?.lat != null && last?.lng != null
-              ? `${last.lat.toFixed(4)}, ${last.lng.toFixed(4)}`
-              : 'Searching...'}
-          </Text>
+      {/* GPS Coordinates Card */}
+      <View style={styles.gpsCard}>
+        <View style={styles.gpsLeft}>
+          <View style={styles.gpsIconCircle}>
+            <PinIcon size={16} color="#0284C7" />
+          </View>
+          <View>
+            <Text style={styles.gpsLabel}>GPS Coordinates</Text>
+            <Text style={styles.gpsValue}>
+              {last?.lat != null && last?.lng != null
+                ? `${last.lat.toFixed(4)}, ${last.lng.toFixed(4)}`
+                : 'Acquiring GPS...'}
+            </Text>
+          </View>
         </View>
+        <ChevronRightIcon size={18} color="#94A3B8" />
+      </View>
 
-        <View style={styles.infoDivider} />
-
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Environment</Text>
-          <Text style={styles.infoValue}>
+      {/* Environment & Device Details Card */}
+      <View style={styles.detailsCard}>
+        <View style={styles.detailRow}>
+          <Text style={styles.detailLabel}>Environment</Text>
+          <Text style={styles.detailValue}>
             {last?.location_type || 'Outdoor'} {last?.accuracy ? `(±${Math.round(last.accuracy)}m)` : ''}
           </Text>
         </View>
-
-        <View style={styles.infoDivider} />
-
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Device & OS</Text>
-          <Text style={styles.infoValue}>
+        <View style={styles.detailDivider} />
+        <View style={styles.detailRow}>
+          <Text style={styles.detailLabel}>Device & OS</Text>
+          <Text style={styles.detailValue}>
             {last?.device_model || 'Mobile'} ({last?.os_platform || 'iOS/Android'})
           </Text>
         </View>
-
-        <View style={styles.infoDivider} />
-
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Last Test / Interval</Text>
-          <Text style={styles.infoValue}>
+        <View style={styles.detailDivider} />
+        <View style={styles.detailRow}>
+          <Text style={styles.detailLabel}>Last Test / Cadence</Text>
+          <Text style={styles.detailValue}>
             {formatLastTime(last?.ts ?? null)} ({config ? `${config.testIntervalSeconds}s` : '5m'})
           </Text>
         </View>
@@ -276,180 +285,192 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
 const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
+    backgroundColor: '#F4F6FA',
   },
   scrollContent: {
     paddingHorizontal: 16,
-    paddingBottom: 32,
+    paddingTop: 12,
+    paddingBottom: 24,
   },
-  statusBanner: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#131B2E',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginTop: 10,
+  gaugeCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    paddingVertical: 18,
+    paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: '#1E293B',
-  },
-  statusIndicatorRow: {
-    flexDirection: 'row',
+    borderColor: '#E8EDF2',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 3,
+    marginBottom: 16,
     alignItems: 'center',
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 8,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#E2E8F0',
-    letterSpacing: 0.8,
-  },
-  pendingBadge: {
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
-    borderWidth: 1,
-    borderColor: '#F59E0B',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  pendingBadgeText: {
-    color: '#F59E0B',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  syncedBadge: {
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  syncedBadgeText: {
-    color: '#10B981',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  gaugeContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginVertical: 10,
   },
   progressContainer: {
-    width: '85%',
+    width: '90%',
     alignItems: 'center',
-    marginTop: 4,
+    marginVertical: 10,
   },
   progressBarTrack: {
     width: '100%',
     height: 6,
-    backgroundColor: '#1E293B',
+    backgroundColor: '#E2E8F0',
     borderRadius: 3,
     overflow: 'hidden',
   },
   progressBarFill: {
     height: '100%',
-    backgroundColor: '#06B6D4',
+    backgroundColor: '#00A389',
     borderRadius: 3,
   },
   progressMessage: {
     fontSize: 12,
-    color: '#38BDF8',
+    color: '#00A389',
     fontWeight: '600',
     marginTop: 6,
   },
-  controlsRow: {
+  actionButtonsRow: {
     flexDirection: 'row',
+    width: '100%',
+    marginTop: 14,
     gap: 12,
-    marginBottom: 16,
   },
-  primaryBtn: {
-    flex: 2,
-    paddingVertical: 14,
-    borderRadius: 14,
+  startMonitoringBtn: {
+    flex: 1.3,
+    backgroundColor: '#00A389',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    paddingVertical: 13,
+    borderRadius: 14,
+    gap: 8,
+    shadowColor: '#00A389',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
   },
-  startBtn: {
-    backgroundColor: '#06B6D4',
-    shadowColor: '#06B6D4',
-  },
-  stopBtn: {
+  stopMonitoringBtn: {
     backgroundColor: '#EF4444',
     shadowColor: '#EF4444',
   },
-  primaryBtnText: {
-    color: '#0F172A',
-    fontWeight: '800',
-    fontSize: 15,
-    letterSpacing: 1,
+  startBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 14,
   },
-  secondaryBtn: {
+  testNowBtn: {
     flex: 1,
-    backgroundColor: '#1E293B',
-    borderRadius: 14,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#334155',
+    paddingVertical: 13,
+    borderRadius: 14,
+    gap: 6,
   },
-  secondaryBtnText: {
-    color: '#38BDF8',
+  testNowBtnText: {
+    color: '#1E293B',
     fontWeight: '700',
-    fontSize: 13,
-    letterSpacing: 0.5,
+    fontSize: 14,
   },
   btnDisabled: {
     opacity: 0.6,
   },
-  sectionHeading: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#64748B',
-    letterSpacing: 1.2,
+  sectionHeadingRow: {
     marginBottom: 10,
-    marginLeft: 4,
+    marginTop: 4,
+    paddingHorizontal: 2,
+  },
+  sectionHeading: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1E293B',
+    letterSpacing: -0.2,
   },
   metricsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginHorizontal: -6,
-    marginBottom: 14,
+    marginHorizontal: -5,
+    marginBottom: 10,
   },
-  infoCard: {
-    backgroundColor: '#131B2E',
-    borderRadius: 14,
+  gpsCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    borderWidth: 1,
+    borderColor: '#E8EDF2',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  gpsLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  gpsIconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#E0F2FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gpsLabel: {
+    fontSize: 12,
+    color: '#64748B',
+    fontWeight: '600',
+  },
+  gpsValue: {
+    fontSize: 14,
+    color: '#0F172A',
+    fontWeight: '700',
+    marginTop: 2,
+    fontVariant: ['tabular-nums'],
+  },
+  detailsCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
     padding: 14,
     borderWidth: 1,
-    borderColor: '#1E293B',
+    borderColor: '#E8EDF2',
+    marginBottom: 12,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
   },
-  infoRow: {
+  detailRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 4,
   },
-  infoLabel: {
-    fontSize: 13,
-    color: '#94A3B8',
+  detailLabel: {
+    fontSize: 12,
+    color: '#64748B',
     fontWeight: '500',
   },
-  infoValue: {
-    fontSize: 13,
-    color: '#F8FAFC',
+  detailValue: {
+    fontSize: 12,
+    color: '#0F172A',
     fontWeight: '700',
-    fontFamily: 'Courier',
   },
-  infoDivider: {
+  detailDivider: {
     height: 1,
-    backgroundColor: '#1E293B',
+    backgroundColor: '#F1F5F9',
     marginVertical: 6,
   },
 });

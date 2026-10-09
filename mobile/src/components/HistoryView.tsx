@@ -10,19 +10,28 @@ import {
 import { Sample } from '../types';
 import { sampleStore } from '../services/sampleStore';
 import { exportSamplesAsCSV, exportSamplesAsJSON } from '../utils/exportUtils';
+import {
+  DownloadIcon,
+  UploadIcon,
+  ClockIcon,
+  WaveformIcon,
+  ChevronRightIcon,
+} from './Icons';
 
 interface HistoryViewProps {
   samples: Sample[];
   onRefresh: () => void;
-  onNavigateToSettings?: () => void;
+  onNavigateTab?: (tab: 'SPEED' | 'MAP' | 'HISTORY' | 'SETTINGS') => void;
 }
 
 export const HistoryView: React.FC<HistoryViewProps> = ({
   samples,
   onRefresh,
+  onNavigateTab,
 }) => {
   const [selectedFilter, setSelectedFilter] = useState('ALL');
-  const [displayLimit, setDisplayLimit] = useState<number | 'ALL'>(50);
+  const [displayLimit] = useState<number | 'ALL'>(50);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [capacityInfo, setCapacityInfo] = useState<{
     count: number;
     maxLimit: number;
@@ -39,24 +48,22 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     sampleStore.getCapacityInfo().then(setCapacityInfo);
   }, [samples]);
 
-  // Compute aggregate statistics
+  // Compute aggregate statistics for the 4-column strip
   const summary = useMemo(() => {
     if (samples.length === 0) {
-      return { total: 0, avgDown: 0, avgUp: 0, bestPing: 0, avgJitter: 0 };
+      return { total: 0, avgDown: 0, avgUp: 0, avgPing: 0 };
     }
     let sumDown = 0;
     let sumUp = 0;
-    let bestPing = Infinity;
-    let sumJitter = 0;
-    let jitterCount = 0;
+    let sumPing = 0;
+    let pingCount = 0;
 
     samples.forEach(s => {
       if (s.down_mbps != null) sumDown += s.down_mbps;
       if (s.up_mbps != null) sumUp += s.up_mbps;
-      if (s.latency_ms != null && s.latency_ms < bestPing) bestPing = s.latency_ms;
-      if (s.jitter_ms != null) {
-        sumJitter += s.jitter_ms;
-        jitterCount++;
+      if (s.latency_ms != null) {
+        sumPing += s.latency_ms;
+        pingCount++;
       }
     });
 
@@ -64,8 +71,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       total: samples.length,
       avgDown: parseFloat((sumDown / samples.length).toFixed(1)),
       avgUp: parseFloat((sumUp / samples.length).toFixed(1)),
-      bestPing: bestPing === Infinity ? 0 : Math.round(bestPing),
-      avgJitter: jitterCount > 0 ? parseFloat((sumJitter / jitterCount).toFixed(1)) : 0,
+      avgPing: pingCount > 0 ? Math.round(sumPing / pingCount) : 0,
     };
   }, [samples]);
 
@@ -73,7 +79,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const filteredSamples = useMemo(() => {
     let result = samples;
     if (selectedFilter === 'WI-FI') result = samples.filter(s => s.network === 'wifi');
-    else if (selectedFilter === 'CELLULAR') result = samples.filter(s => s.network === 'cellular');
     else if (selectedFilter === '5G') result = samples.filter(s => s.radio?.includes('5G'));
     else if (selectedFilter === '4G') result = samples.filter(s => s.radio?.includes('4G') || s.radio?.includes('LTE'));
     else if (selectedFilter === 'JIO') result = samples.filter(s => s.carrier?.toLowerCase().includes('jio'));
@@ -87,7 +92,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     return result;
   }, [samples, selectedFilter, displayLimit]);
 
-  // Handle Export Options
+  // Group or date label
+  const latestDateLabel = useMemo(() => {
+    if (samples.length === 0) return 'Recent History';
+    const firstDate = new Date(samples[0].ts * 1000);
+    return firstDate.toLocaleDateString([], {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+  }, [samples]);
+
   const handleExportPrompt = () => {
     if (samples.length === 0) {
       Alert.alert('No Data', 'No test samples available to export.');
@@ -96,7 +111,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
     Alert.alert(
       'Export Test History',
-      `Export ${samples.length} test records to your device or share:`,
+      `Export ${samples.length} test records to your device:`,
       [
         {
           text: '📊 Export as CSV (Spreadsheet)',
@@ -111,7 +126,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     );
   };
 
-  // Handle Clear History with Safe Export Prompt
   const handleClearHistory = () => {
     if (samples.length === 0) return;
 
@@ -140,172 +154,167 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     );
   };
 
-  const formatDate = (epochSec: number) => {
+  const formatTime = (epochSec: number) => {
     const d = new Date(epochSec * 1000);
-    return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} at ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
   };
 
   const filterChips = ['ALL', '5G', '4G', 'WI-FI', 'JIO', 'AIRTEL', 'BSNL'];
-  const limitOptions: (number | 'ALL')[] = [25, 50, 100, 250, 'ALL'];
 
   const renderItem = ({ item }: { item: Sample }) => {
+    const isExpanded = expandedId === item.id;
+    const carrier =
+      item.carrier && item.carrier !== '--' && item.carrier !== 'wifi'
+        ? item.carrier
+        : item.network === 'wifi'
+        ? 'Wi-Fi'
+        : item.radio || 'Cellular';
+
+    const pillLabel =
+      item.network === 'wifi'
+        ? `${carrier} • Wi-Fi`
+        : item.radio
+        ? `${carrier} • ${item.radio}`
+        : carrier;
+
     return (
-      <View style={styles.card}>
+      <TouchableOpacity
+        style={styles.recordCard}
+        activeOpacity={0.85}
+        onPress={() => setExpandedId(isExpanded ? null : item.id)}>
+        {/* Top Header Row (Time, Pills, Chevron) */}
         <View style={styles.cardHeader}>
+          <Text style={styles.timeText}>{formatTime(item.ts)}</Text>
+
           <View style={styles.badgeRow}>
-            <View style={styles.carrierBadge}>
-              <Text style={styles.carrierBadgeText}>
-                {item.carrier && item.carrier !== '--' && item.carrier !== 'wifi'
-                  ? item.carrier
-                  : item.network === 'wifi'
-                  ? 'Wi-Fi'
-                  : item.radio || 'Cellular'}
-              </Text>
+            <View style={styles.carrierPill}>
+              <Text style={styles.carrierPillText}>{pillLabel}</Text>
             </View>
-            {item.network === 'wifi' && item.carrier && item.carrier !== 'Wi-Fi' ? (
-              <View style={[styles.radioBadge, { backgroundColor: 'rgba(6, 182, 212, 0.15)' }]}>
-                <Text style={[styles.radioBadgeText, { color: '#06B6D4' }]}>Wi-Fi</Text>
-              </View>
-            ) : item.radio && item.network !== 'wifi' ? (
-              <View style={styles.radioBadge}>
-                <Text style={styles.radioBadgeText}>{item.radio}</Text>
-              </View>
-            ) : null}
+
             {item.location_type ? (
-              <View style={styles.envBadge}>
-                <Text style={styles.envBadgeText}>{item.location_type}</Text>
+              <View style={styles.envPill}>
+                <Text style={styles.envPillText}>{item.location_type}</Text>
               </View>
             ) : null}
           </View>
-          <Text style={styles.timeText}>{formatDate(item.ts)}</Text>
+
+          <View style={[styles.chevronBox, isExpanded && styles.chevronRotated]}>
+            <ChevronRightIcon size={16} color="#94A3B8" />
+          </View>
         </View>
 
+        {/* 4-Metrics Quick Columns */}
         <View style={styles.metricsRow}>
           <View style={styles.metricItem}>
-            <Text style={styles.metricLabel}>DOWNLOAD</Text>
-            <Text style={[styles.metricVal, { color: '#06B6D4' }]}>
+            <DownloadIcon size={14} color="#0284C7" />
+            <Text style={styles.metricVal}>
               {item.down_mbps != null ? item.down_mbps.toFixed(1) : '--'}
-              <Text style={styles.metricUnit}> Mbps</Text>
             </Text>
+            <Text style={styles.metricUnit}>Mbps</Text>
           </View>
 
           <View style={styles.metricItem}>
-            <Text style={styles.metricLabel}>UPLOAD</Text>
-            <Text style={[styles.metricVal, { color: '#8B5CF6' }]}>
+            <UploadIcon size={14} color="#7C3AED" />
+            <Text style={styles.metricVal}>
               {item.up_mbps != null ? item.up_mbps.toFixed(1) : '--'}
-              <Text style={styles.metricUnit}> Mbps</Text>
             </Text>
+            <Text style={styles.metricUnit}>Mbps</Text>
           </View>
 
           <View style={styles.metricItem}>
-            <Text style={styles.metricLabel}>PING</Text>
-            <Text style={[styles.metricVal, { color: '#F59E0B' }]}>
+            <ClockIcon size={14} color="#D97706" />
+            <Text style={styles.metricVal}>
               {item.latency_ms != null ? Math.round(item.latency_ms) : '--'}
-              <Text style={styles.metricUnit}> ms</Text>
             </Text>
+            <Text style={styles.metricUnit}>ms</Text>
           </View>
 
           <View style={styles.metricItem}>
-            <Text style={styles.metricLabel}>JITTER</Text>
-            <Text style={[styles.metricVal, { color: '#EC4899' }]}>
+            <WaveformIcon size={14} color="#DB2777" />
+            <Text style={styles.metricVal}>
               {item.jitter_ms != null ? item.jitter_ms.toFixed(1) : '--'}
-              <Text style={styles.metricUnit}> ms</Text>
             </Text>
+            <Text style={styles.metricUnit}>ms</Text>
           </View>
         </View>
 
-        {item.lat != null && item.lng != null ? (
-          <View style={styles.locationFooter}>
-            <Text style={styles.coordsText}>
-              📍 {item.lat.toFixed(5)}, {item.lng.toFixed(5)}
-              {item.accuracy != null ? ` (±${Math.round(item.accuracy)}m)` : ''}
+        {/* Expanded Info Drawer */}
+        {isExpanded && (
+          <View style={styles.expandedDrawer}>
+            {item.lat != null && item.lng != null && (
+              <Text style={styles.expandedText}>
+                📍 GPS: {item.lat.toFixed(5)}, {item.lng.toFixed(5)}{' '}
+                {item.accuracy ? `(±${Math.round(item.accuracy)}m)` : ''}
+              </Text>
+            )}
+            <Text style={styles.expandedText}>
+              📱 Device: {item.device_model || 'Mobile'} ({item.os_platform || 'OS'})
             </Text>
-            <Text style={styles.deviceText}>
-              {item.device_model || 'Mobile'} • {item.packet_loss_pct ?? 0}% Loss
+            <Text style={styles.expandedText}>
+              🛡️ Packet Loss: {item.packet_loss_pct ?? 0}%
             </Text>
           </View>
-        ) : null}
-      </View>
+        )}
+      </TouchableOpacity>
     );
   };
 
   return (
     <View style={styles.container}>
-      {/* Capacity & Auto-Depletion Banner */}
-      {capacityInfo.isFull ? (
-        <View style={styles.capacityWarningCard}>
-          <View style={styles.warningHeaderRow}>
-            <Text style={styles.warningTitle}>⚠️ Capacity Reached ({capacityInfo.count}/{capacityInfo.maxLimit})</Text>
-            <TouchableOpacity onPress={handleExportPrompt} style={styles.warningExportBtn}>
-              <Text style={styles.warningExportBtnText}>📤 Backup</Text>
-            </TouchableOpacity>
-          </View>
-          <Text style={styles.warningDesc}>
-            New tests will auto-deplete (overwrite) the oldest entries. You can export a backup or raise capacity in Settings.
-          </Text>
-        </View>
-      ) : (
-        <View style={styles.storageStatusStrip}>
-          <Text style={styles.storageStatusText}>
-            💾 Local Store: <Text style={styles.storageStatusHighlight}>{capacityInfo.count} / {capacityInfo.maxLimit}</Text> entries (auto-rotates when full)
-          </Text>
-        </View>
-      )}
+      {/* Top Segmented Sub-Nav: Overview | Map | History (Option C Style) */}
+      <View style={styles.topSegmentedRow}>
+        <TouchableOpacity
+          style={styles.segmentedTab}
+          onPress={() => onNavigateTab && onNavigateTab('SPEED')}>
+          <Text style={styles.segmentedTabText}>Overview</Text>
+        </TouchableOpacity>
 
-      {/* Summary KPI Cards Strip */}
-      <View style={styles.summaryCard}>
-        <View style={styles.summaryItem}>
-          <Text style={styles.summaryLabel}>TOTAL TESTS</Text>
-          <Text style={styles.summaryValue}>{summary.total}</Text>
-        </View>
-        <View style={styles.summaryDivider} />
-        <View style={styles.summaryItem}>
-          <Text style={styles.summaryLabel}>AVG DOWNLOAD</Text>
-          <Text style={[styles.summaryValue, { color: '#06B6D4' }]}>
-            {summary.avgDown > 0 ? `${summary.avgDown} M` : '--'}
-          </Text>
-        </View>
-        <View style={styles.summaryDivider} />
-        <View style={styles.summaryItem}>
-          <Text style={styles.summaryLabel}>AVG UPLOAD</Text>
-          <Text style={[styles.summaryValue, { color: '#8B5CF6' }]}>
-            {summary.avgUp > 0 ? `${summary.avgUp} M` : '--'}
-          </Text>
-        </View>
-        <View style={styles.summaryDivider} />
-        <View style={styles.summaryItem}>
-          <Text style={styles.summaryLabel}>BEST PING</Text>
-          <Text style={[styles.summaryValue, { color: '#10B981' }]}>
-            {summary.bestPing > 0 ? `${summary.bestPing}ms` : '--'}
-          </Text>
-        </View>
+        <TouchableOpacity
+          style={styles.segmentedTab}
+          onPress={() => onNavigateTab && onNavigateTab('MAP')}>
+          <Text style={styles.segmentedTabText}>Map</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.segmentedTab, styles.segmentedTabActive]}>
+          <Text style={styles.segmentedTabTextActive}>History</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* Display Limit & Visibility Bar */}
-      <View style={styles.controlSection}>
-        <View style={styles.displayLimitRow}>
-          <Text style={styles.controlLabel}>
-            VIEW: <Text style={styles.controlCounter}>Showing {filteredSamples.length} of {samples.length}</Text>
+      {/* Summary KPI Strip (Total Tests, Avg Download, Avg Upload, Avg Ping) */}
+      <View style={styles.summaryCard}>
+        <View style={styles.summaryItem}>
+          <Text style={styles.summaryValue}>{summary.total}</Text>
+          <Text style={styles.summaryLabel}>Total Tests</Text>
+        </View>
+
+        <View style={styles.summaryDivider} />
+
+        <View style={styles.summaryItem}>
+          <Text style={styles.summaryValue}>
+            {summary.avgDown > 0 ? summary.avgDown : '--'}
           </Text>
-          <View style={styles.limitPillsContainer}>
-            {limitOptions.map(opt => (
-              <TouchableOpacity
-                key={String(opt)}
-                style={[
-                  styles.limitPill,
-                  displayLimit === opt && styles.limitPillActive,
-                ]}
-                onPress={() => setDisplayLimit(opt)}>
-                <Text
-                  style={[
-                    styles.limitPillText,
-                    displayLimit === opt && styles.limitPillTextActive,
-                  ]}>
-                  {opt === 'ALL' ? 'All' : opt}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          <Text style={styles.summaryLabel}>Avg Download</Text>
+          <Text style={styles.summarySubLabel}>(Mbps)</Text>
+        </View>
+
+        <View style={styles.summaryDivider} />
+
+        <View style={styles.summaryItem}>
+          <Text style={styles.summaryValue}>
+            {summary.avgUp > 0 ? summary.avgUp : '--'}
+          </Text>
+          <Text style={styles.summaryLabel}>Avg Upload</Text>
+          <Text style={styles.summarySubLabel}>(Mbps)</Text>
+        </View>
+
+        <View style={styles.summaryDivider} />
+
+        <View style={styles.summaryItem}>
+          <Text style={styles.summaryValue}>
+            {summary.avgPing > 0 ? summary.avgPing : '--'}
+          </Text>
+          <Text style={styles.summaryLabel}>Avg Ping</Text>
+          <Text style={styles.summarySubLabel}>(ms)</Text>
         </View>
       </View>
 
@@ -316,33 +325,49 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           showsHorizontalScrollIndicator={false}
           data={filterChips}
           keyExtractor={item => item}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[
-                styles.filterChip,
-                selectedFilter === item && styles.filterChipActive,
-              ]}
-              onPress={() => setSelectedFilter(item)}>
-              <Text
-                style={[
-                  styles.filterChipText,
-                  selectedFilter === item && styles.filterChipTextActive,
-                ]}>
-                {item}
-              </Text>
-            </TouchableOpacity>
-          )}
+          renderItem={({ item }) => {
+            const isActive = selectedFilter === item;
+            return (
+              <TouchableOpacity
+                style={[styles.filterChip, isActive && styles.filterChipActive]}
+                onPress={() => setSelectedFilter(item)}>
+                <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>
+                  {item === 'WI-FI' ? 'Wi-Fi' : item}
+                </Text>
+              </TouchableOpacity>
+            );
+          }}
           contentContainerStyle={styles.filterContent}
         />
       </View>
 
-      {/* History List */}
+      {/* Date Header Strip */}
+      <View style={styles.dateHeaderRow}>
+        <Text style={styles.dateHeaderText}>{latestDateLabel}</Text>
+        <Text style={styles.recordCountText}>
+          {filteredSamples.length} {filteredSamples.length === 1 ? 'Record' : 'Records'}
+        </Text>
+      </View>
+
+      {/* Capacity Strip Warning (if full) */}
+      {capacityInfo.isFull && (
+        <View style={styles.capacityWarning}>
+          <Text style={styles.capacityWarningText}>
+            ⚠️ Capacity reached ({capacityInfo.count}/{capacityInfo.maxLimit}). Auto-depleting oldest entries.
+          </Text>
+          <TouchableOpacity onPress={handleExportPrompt}>
+            <Text style={styles.capacityExportLink}>Backup</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Main History Records List */}
       {filteredSamples.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyIcon}>📊</Text>
-          <Text style={styles.emptyTitle}>No Test Records Found</Text>
+          <Text style={styles.emptyTitle}>No Test Records</Text>
           <Text style={styles.emptySubtitle}>
-            Run a speed test or start continuous monitoring to populate history.
+            Run speed tests to record telemetry metrics.
           </Text>
         </View>
       ) : (
@@ -351,26 +376,27 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           keyExtractor={item => item.id}
           renderItem={renderItem}
           contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
         />
       )}
 
-      {/* Actions footer */}
+      {/* Bottom Action Footer */}
       <View style={styles.actionRow}>
         <TouchableOpacity
-          style={[styles.exportBtn, samples.length === 0 && styles.btnDisabled]}
+          style={[styles.actionBtn, styles.exportBtn, samples.length === 0 && styles.btnDisabled]}
           onPress={handleExportPrompt}
           disabled={samples.length === 0}>
           <Text style={styles.exportBtnText}>📤 Export CSV/JSON</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.clearBtn, samples.length === 0 && styles.btnDisabled]}
+          style={[styles.actionBtn, styles.clearBtn, samples.length === 0 && styles.btnDisabled]}
           onPress={handleClearHistory}
           disabled={samples.length === 0}>
-          <Text style={styles.clearBtnText}>🗑 Clear Log</Text>
+          <Text style={styles.clearBtnText}>🗑 Clear</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.refreshBtn} onPress={onRefresh}>
+        <TouchableOpacity style={[styles.actionBtn, styles.refreshBtn]} onPress={onRefresh}>
           <Text style={styles.refreshBtnText}>🔄 Refresh</Text>
         </TouchableOpacity>
       </View>
@@ -381,140 +407,86 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0B0F19',
+    backgroundColor: '#F4F6FA',
   },
-  capacityWarningCard: {
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    borderWidth: 1,
-    borderColor: '#F59E0B',
-    borderRadius: 12,
+  topSegmentedRow: {
+    flexDirection: 'row',
+    backgroundColor: '#E2E8F0',
+    borderRadius: 24,
+    padding: 3,
     marginHorizontal: 16,
     marginTop: 8,
-    padding: 10,
+    marginBottom: 10,
   },
-  warningHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  segmentedTab: {
+    flex: 1,
+    paddingVertical: 7,
     alignItems: 'center',
-    marginBottom: 4,
+    justifyContent: 'center',
+    borderRadius: 20,
   },
-  warningTitle: {
-    color: '#F59E0B',
+  segmentedTabActive: {
+    backgroundColor: '#00A389',
+    shadowColor: '#00A389',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  segmentedTabText: {
     fontSize: 12,
-    fontWeight: '800',
-  },
-  warningExportBtn: {
-    backgroundColor: '#F59E0B',
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  warningExportBtnText: {
-    color: '#0F172A',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  warningDesc: {
-    color: '#E2E8F0',
-    fontSize: 11,
-    lineHeight: 15,
-  },
-  storageStatusStrip: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 2,
-  },
-  storageStatusText: {
-    color: '#64748B',
-    fontSize: 11,
     fontWeight: '600',
+    color: '#64748B',
   },
-  storageStatusHighlight: {
-    color: '#38BDF8',
+  segmentedTabTextActive: {
+    fontSize: 12,
     fontWeight: '700',
+    color: '#FFFFFF',
   },
   summaryCard: {
     flexDirection: 'row',
-    backgroundColor: '#131B2E',
+    backgroundColor: '#FFFFFF',
     marginHorizontal: 16,
-    marginTop: 6,
-    marginBottom: 8,
-    borderRadius: 14,
-    paddingVertical: 10,
+    marginBottom: 10,
+    borderRadius: 16,
+    paddingVertical: 12,
     paddingHorizontal: 8,
     borderWidth: 1,
-    borderColor: '#1E293B',
+    borderColor: '#E8EDF2',
     alignItems: 'center',
     justifyContent: 'space-around',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
   },
   summaryItem: {
     alignItems: 'center',
     flex: 1,
   },
+  summaryValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0F172A',
+    fontVariant: ['tabular-nums'],
+  },
   summaryLabel: {
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#64748B',
-    letterSpacing: 0.5,
+    marginTop: 2,
+    textAlign: 'center',
   },
-  summaryValue: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#F8FAFC',
-    marginTop: 3,
+  summarySubLabel: {
+    fontSize: 8,
+    color: '#94A3B8',
+    marginTop: 1,
   },
   summaryDivider: {
     width: 1,
-    height: 24,
-    backgroundColor: '#1E293B',
-  },
-  controlSection: {
-    paddingHorizontal: 16,
-    marginBottom: 8,
-  },
-  displayLimitRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#131B2E',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#1E293B',
-  },
-  controlLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#94A3B8',
-  },
-  controlCounter: {
-    color: '#38BDF8',
-    fontWeight: '600',
-  },
-  limitPillsContainer: {
-    flexDirection: 'row',
-    gap: 4,
-  },
-  limitPill: {
-    backgroundColor: '#1E293B',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  limitPillActive: {
-    backgroundColor: '#38BDF8',
-    borderColor: '#38BDF8',
-  },
-  limitPillText: {
-    color: '#94A3B8',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  limitPillTextActive: {
-    color: '#0F172A',
+    height: 28,
+    backgroundColor: '#E2E8F0',
   },
   filterBar: {
     marginBottom: 8,
@@ -524,124 +496,164 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   filterChip: {
-    backgroundColor: '#1E293B',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#E2E8F0',
   },
   filterChipActive: {
-    backgroundColor: '#06B6D4',
-    borderColor: '#06B6D4',
+    backgroundColor: '#00A389',
+    borderColor: '#00A389',
   },
   filterChipText: {
-    color: '#94A3B8',
-    fontSize: 11,
-    fontWeight: '700',
+    color: '#64748B',
+    fontSize: 12,
+    fontWeight: '600',
   },
   filterChipTextActive: {
-    color: '#0F172A',
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
-  listContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 40,
-  },
-  card: {
-    backgroundColor: '#131B2E',
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#1E293B',
-  },
-  cardHeader: {
+  dateHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    paddingHorizontal: 18,
+    marginVertical: 4,
+  },
+  dateHeaderText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1E293B',
+  },
+  recordCountText: {
+    fontSize: 12,
+    color: '#94A3B8',
+    fontWeight: '500',
+  },
+  capacityWarning: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+    borderRadius: 10,
+    marginHorizontal: 16,
+    marginTop: 4,
+    marginBottom: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  capacityWarningText: {
+    color: '#92400E',
+    fontSize: 11,
+    fontWeight: '600',
+    flex: 1,
+  },
+  capacityExportLink: {
+    color: '#B45309',
+    fontSize: 11,
+    fontWeight: '800',
+    marginLeft: 6,
+  },
+  listContent: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 24,
+  },
+  recordCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#E8EDF2',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 5,
+    elevation: 2,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  timeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginRight: 8,
   },
   badgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    flex: 1,
   },
-  carrierBadge: {
-    backgroundColor: 'rgba(6, 182, 212, 0.15)',
+  carrierPill: {
+    backgroundColor: '#CCFBF1',
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical: 2,
     borderRadius: 6,
   },
-  carrierBadgeText: {
-    color: '#06B6D4',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  radioBadge: {
-    backgroundColor: 'rgba(139, 92, 246, 0.15)',
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  radioBadgeText: {
-    color: '#A78BFA',
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  envBadge: {
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  envBadgeText: {
-    color: '#10B981',
+  carrierPillText: {
+    color: '#0F766E',
     fontSize: 10,
     fontWeight: '700',
   },
-  timeText: {
-    color: '#94A3B8',
-    fontSize: 11,
+  envPill: {
+    backgroundColor: '#ECFDF5',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  envPillText: {
+    color: '#059669',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  chevronBox: {
+    padding: 2,
+  },
+  chevronRotated: {
+    transform: [{ rotate: '90deg' }],
   },
   metricsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 6,
+    paddingTop: 4,
   },
   metricItem: {
-    flex: 1,
-  },
-  metricLabel: {
-    fontSize: 9,
-    color: '#64748B',
-    fontWeight: '700',
-    marginBottom: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
   },
   metricVal: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '800',
+    color: '#0F172A',
+    fontVariant: ['tabular-nums'],
   },
   metricUnit: {
     fontSize: 10,
-    fontWeight: '400',
-    color: '#94A3B8',
+    fontWeight: '500',
+    color: '#64748B',
   },
-  locationFooter: {
-    borderTopWidth: 1,
-    borderTopColor: '#1E293B',
+  expandedDrawer: {
+    marginTop: 8,
     paddingTop: 8,
-    marginTop: 6,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    gap: 3,
   },
-  coordsText: {
-    fontSize: 11,
-    color: '#94A3B8',
-    fontFamily: 'Courier',
-  },
-  deviceText: {
+  expandedText: {
     fontSize: 11,
     color: '#64748B',
+    fontWeight: '500',
   },
   emptyContainer: {
     flex: 1,
@@ -650,76 +662,60 @@ const styles = StyleSheet.create({
     padding: 30,
   },
   emptyIcon: {
-    fontSize: 48,
-    marginBottom: 12,
+    fontSize: 44,
+    marginBottom: 8,
   },
   emptyTitle: {
-    color: '#F8FAFC',
+    color: '#0F172A',
     fontSize: 16,
     fontWeight: '700',
-    marginBottom: 6,
+    marginBottom: 4,
   },
   emptySubtitle: {
     color: '#64748B',
-    fontSize: 13,
+    fontSize: 12,
     textAlign: 'center',
-    lineHeight: 18,
   },
   actionRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingVertical: 10,
-    backgroundColor: '#0B0F19',
+    backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
-    borderTopColor: '#1E293B',
+    borderTopColor: '#E8EDF2',
     gap: 8,
   },
-  exportBtn: {
-    flex: 1.2,
+  actionBtn: {
     paddingVertical: 9,
     paddingHorizontal: 10,
-    borderRadius: 8,
-    backgroundColor: 'rgba(56, 189, 248, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.3)',
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  exportBtn: {
+    flex: 1.4,
+    backgroundColor: '#E0F2FE',
   },
   exportBtnText: {
-    color: '#38BDF8',
+    color: '#0284C7',
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   clearBtn: {
-    flex: 0.9,
-    paddingVertical: 9,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flex: 0.8,
+    backgroundColor: '#FEE2E2',
   },
   clearBtnText: {
-    color: '#EF4444',
+    color: '#DC2626',
     fontSize: 11,
     fontWeight: '700',
   },
   refreshBtn: {
-    flex: 0.9,
-    paddingVertical: 9,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    backgroundColor: '#1E293B',
-    borderWidth: 1,
-    borderColor: '#334155',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flex: 0.8,
+    backgroundColor: '#F1F5F9',
   },
   refreshBtnText: {
-    color: '#F8FAFC',
+    color: '#1E293B',
     fontSize: 11,
     fontWeight: '700',
   },

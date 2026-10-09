@@ -109,7 +109,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
   };
 
   const intervalOptions = [
-    { label: '30s (Drive/Test)', value: 30 },
+    { label: '30s', value: 30 },
     { label: '1m', value: 60 },
     { label: '5m', value: 300 },
     { label: '15m', value: 900 },
@@ -120,7 +120,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
   const historyLimitOptions = [100, 250, 500, 1000, 2500, 5000];
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}>
       {savedSuccess && (
         <View style={styles.successBanner}>
           <Text style={styles.successBannerText}>✓ Configuration Saved Successfully</Text>
@@ -136,7 +139,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
           value={serverUrl}
           onChangeText={setServerUrl}
           placeholder="https://140-245-3-81.sslip.io"
-          placeholderTextColor="#475569"
+          placeholderTextColor="#94A3B8"
           autoCapitalize="none"
           autoCorrect={false}
         />
@@ -173,8 +176,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
 
       {/* History Storage Retention Limit */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>History Storage & Auto-Depletion</Text>
-        <Text style={styles.label}>Max Local Log Capacity (Entries)</Text>
+        <Text style={styles.sectionTitle}>History Storage & Rotation</Text>
+        <Text style={styles.label}>Max Local Log Capacity</Text>
         <View style={styles.buttonGroup}>
           {historyLimitOptions.map(limit => (
             <TouchableOpacity
@@ -192,7 +195,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
           ))}
         </View>
         <Text style={styles.helperText}>
-          Currently holding {sampleCount} records. Once storage reaches this cap, older entries automatically auto-deplete (rotate out) to prevent memory overload.
+          Currently holding {sampleCount} records. Auto-rotates when capacity is reached.
         </Text>
       </View>
 
@@ -217,7 +220,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
           ))}
         </View>
 
-        <Text style={[styles.label, { marginTop: 12 }]}>Upload Test Size (MB)</Text>
+        <Text style={[styles.label, styles.marginTopLabel]}>Upload Test Size (MB)</Text>
         <View style={styles.buttonGroup}>
           {payloadOptions.slice(0, 3).map(mb => (
             <TouchableOpacity
@@ -245,7 +248,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
         <Switch
           value={wifiOnly}
           onValueChange={setWifiOnly}
-          trackColor={{ false: '#334155', true: '#06B6D4' }}
+          trackColor={{ false: '#E2E8F0', true: '#00A389' }}
           thumbColor="#FFFFFF"
         />
       </View>
@@ -253,7 +256,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
       {/* Export & Data Management */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Data Export & Backup</Text>
-        <Text style={styles.helperText}>Export all local speed test logs for external analysis:</Text>
+        <Text style={styles.helperText}>Export all local speed test logs for spreadsheet analysis:</Text>
         <View style={styles.exportBtnRow}>
           <TouchableOpacity style={styles.exportActionBtn} onPress={handleExportCSV}>
             <Text style={styles.exportActionBtnText}>📊 Export as CSV</Text>
@@ -272,12 +275,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
       </View>
 
       {/* Save Button */}
-      <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
-        <Text style={styles.saveBtnText}>SAVE CONFIGURATION</Text>
+      <TouchableOpacity style={styles.saveBtn} onPress={handleSave} activeOpacity={0.85}>
+        <Text style={styles.saveBtnText}>Save Configuration</Text>
       </TouchableOpacity>
 
       {/* Clear Data */}
-      <TouchableOpacity style={styles.clearBtn} onPress={handleClearData}>
+      <TouchableOpacity style={styles.clearBtn} onPress={handleClearData} activeOpacity={0.85}>
         <Text style={styles.clearBtnText}>Wipe Local Samples & History</Text>
       </TouchableOpacity>
     </ScrollView>
@@ -287,80 +290,87 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0B0F19',
+    backgroundColor: '#F4F6FA',
   },
   content: {
     padding: 16,
     paddingBottom: 40,
   },
   successBanner: {
-    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-    borderColor: '#10B981',
+    backgroundColor: '#ECFDF5',
+    borderColor: '#00A389',
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 12,
-    marginBottom: 16,
+    marginBottom: 14,
     alignItems: 'center',
   },
   successBannerText: {
-    color: '#10B981',
+    color: '#00A389',
     fontWeight: '700',
     fontSize: 13,
   },
   section: {
-    backgroundColor: '#131B2E',
-    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
     padding: 14,
-    marginBottom: 14,
+    marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#1E293B',
+    borderColor: '#E8EDF2',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
   },
   sectionTitle: {
     fontSize: 14,
-    fontWeight: '800',
-    color: '#F8FAFC',
+    fontWeight: '700',
+    color: '#0F172A',
     marginBottom: 10,
-    letterSpacing: 0.5,
+    letterSpacing: -0.2,
   },
   label: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
-    color: '#94A3B8',
-    marginBottom: 8,
+    color: '#64748B',
+    marginBottom: 6,
     textTransform: 'uppercase',
   },
+  marginTopLabel: {
+    marginTop: 12,
+  },
   helperText: {
-    fontSize: 12,
-    color: '#64748B',
-    marginTop: 6,
-    lineHeight: 16,
+    fontSize: 11,
+    color: '#94A3B8',
+    marginTop: 5,
+    lineHeight: 15,
   },
   input: {
-    backgroundColor: '#1E293B',
+    backgroundColor: '#F8FAFC',
     borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    color: '#F8FAFC',
-    fontSize: 15,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#0F172A',
+    fontSize: 14,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#CBD5E1',
   },
   presetRow: {
     flexDirection: 'row',
     marginTop: 8,
-    gap: 8,
   },
   presetBtn: {
-    backgroundColor: '#1E293B',
+    backgroundColor: '#F1F5F9',
     paddingVertical: 6,
     paddingHorizontal: 10,
-    borderRadius: 6,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#E2E8F0',
   },
   presetBtnText: {
-    color: '#38BDF8',
-    fontSize: 12,
+    color: '#00A389',
+    fontSize: 11,
     fontWeight: '600',
   },
   buttonGroup: {
@@ -371,24 +381,24 @@ const styles = StyleSheet.create({
   groupBtn: {
     flex: 1,
     minWidth: '28%',
-    backgroundColor: '#1E293B',
-    paddingVertical: 10,
+    backgroundColor: '#F8FAFC',
+    paddingVertical: 9,
     alignItems: 'center',
-    borderRadius: 8,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#E2E8F0',
   },
   groupBtnActive: {
-    backgroundColor: '#06B6D4',
-    borderColor: '#06B6D4',
+    backgroundColor: '#00A389',
+    borderColor: '#00A389',
   },
   groupBtnText: {
-    color: '#94A3B8',
+    color: '#64748B',
     fontWeight: '600',
-    fontSize: 13,
+    fontSize: 12,
   },
   groupBtnTextActive: {
-    color: '#0F172A',
+    color: '#FFFFFF',
     fontWeight: '700',
   },
   exportBtnRow: {
@@ -398,15 +408,15 @@ const styles = StyleSheet.create({
   },
   exportActionBtn: {
     flex: 1,
-    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    backgroundColor: '#E0F2FE',
     borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.3)',
+    borderColor: '#BAE6FD',
     paddingVertical: 10,
-    borderRadius: 8,
+    borderRadius: 10,
     alignItems: 'center',
   },
   exportActionBtnText: {
-    color: '#38BDF8',
+    color: '#0284C7',
     fontWeight: '700',
     fontSize: 12,
   },
@@ -414,12 +424,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#131B2E',
-    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
     padding: 14,
-    marginBottom: 14,
+    marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#1E293B',
+    borderColor: '#E8EDF2',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
   },
   switchTextContainer: {
     flex: 1,
@@ -427,44 +442,47 @@ const styles = StyleSheet.create({
   switchTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#F8FAFC',
+    color: '#0F172A',
   },
   deviceIdText: {
     color: '#64748B',
     fontFamily: 'Courier',
     fontSize: 12,
-    backgroundColor: '#1E293B',
+    backgroundColor: '#F8FAFC',
     padding: 10,
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
   saveBtn: {
-    backgroundColor: '#06B6D4',
+    backgroundColor: '#00A389',
     paddingVertical: 14,
     borderRadius: 14,
     alignItems: 'center',
-    marginBottom: 12,
-    shadowColor: '#06B6D4',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    marginBottom: 10,
+    shadowColor: '#00A389',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
   },
   saveBtnText: {
-    color: '#0F172A',
-    fontWeight: '800',
+    color: '#FFFFFF',
+    fontWeight: '700',
     fontSize: 15,
-    letterSpacing: 1,
+    letterSpacing: 0.5,
   },
   clearBtn: {
     paddingVertical: 12,
     alignItems: 'center',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#EF4444',
+    borderColor: '#FCA5A5',
+    backgroundColor: '#FEF2F2',
   },
   clearBtnText: {
     color: '#EF4444',
-    fontWeight: '700',
-    fontSize: 13,
+    fontWeight: '600',
+    fontSize: 12,
   },
 });

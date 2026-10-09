@@ -9,6 +9,12 @@ import {
 } from 'react-native';
 import { Sample } from '../types';
 import { sampleStore } from '../services/sampleStore';
+import {
+  DownloadIcon,
+  UploadIcon,
+  ClockIcon,
+  WaveformIcon,
+} from './Icons';
 
 interface HistoryModalProps {
   visible: boolean;
@@ -31,17 +37,23 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) 
 
   const formatDate = (epochSec: number) => {
     const d = new Date(epochSec * 1000);
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
   const renderItem = ({ item }: { item: Sample }) => {
+    const carrier =
+      item.carrier && item.carrier !== '--' && item.carrier !== 'wifi'
+        ? item.carrier
+        : item.network === 'wifi'
+        ? 'Wi-Fi'
+        : item.radio || 'Cellular';
+
     return (
       <View style={styles.card}>
         <View style={styles.cardHeader}>
           <View style={styles.networkBadge}>
             <Text style={styles.networkText}>
-              {item.carrier ? `${item.carrier} • ` : ''}
-              {item.network?.toUpperCase() || 'NET'} {item.radio ? `(${item.radio})` : ''}
+              {carrier} • {item.network === 'wifi' ? 'Wi-Fi' : item.radio || 'Cell'}
             </Text>
           </View>
           <Text style={styles.timeText}>{formatDate(item.ts)}</Text>
@@ -49,36 +61,36 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) 
 
         <View style={styles.statsRow}>
           <View style={styles.statCol}>
-            <Text style={styles.statLabel}>DOWNLOAD</Text>
+            <DownloadIcon size={12} color="#0284C7" />
             <Text style={styles.statValue}>
               {item.down_mbps != null ? `${item.down_mbps.toFixed(1)}` : '--'}
-              <Text style={styles.statUnit}> Mbps</Text>
             </Text>
+            <Text style={styles.statUnit}>Mbps</Text>
           </View>
 
           <View style={styles.statCol}>
-            <Text style={styles.statLabel}>UPLOAD</Text>
+            <UploadIcon size={12} color="#7C3AED" />
             <Text style={styles.statValue}>
               {item.up_mbps != null ? `${item.up_mbps.toFixed(1)}` : '--'}
-              <Text style={styles.statUnit}> Mbps</Text>
             </Text>
+            <Text style={styles.statUnit}>Mbps</Text>
           </View>
 
           <View style={styles.statCol}>
-            <Text style={styles.statLabel}>LATENCY</Text>
+            <ClockIcon size={12} color="#D97706" />
             <Text style={styles.statValue}>
               {item.latency_ms != null ? `${Math.round(item.latency_ms)}` : '--'}
-              <Text style={styles.statUnit}> ms</Text>
             </Text>
+            <Text style={styles.statUnit}>ms</Text>
           </View>
 
           {item.jitter_ms != null ? (
             <View style={styles.statCol}>
-              <Text style={styles.statLabel}>JITTER</Text>
+              <WaveformIcon size={12} color="#DB2777" />
               <Text style={styles.statValue}>
                 {item.jitter_ms.toFixed(1)}
-                <Text style={styles.statUnit}> ms</Text>
               </Text>
+              <Text style={styles.statUnit}>ms</Text>
             </View>
           ) : null}
         </View>
@@ -108,8 +120,8 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) 
 
           {samples.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>No speed test samples recorded yet</Text>
-              <Text style={styles.emptySubtext}>Run a test or start monitoring to record data</Text>
+              <Text style={styles.emptyText}>No test records available</Text>
+              <Text style={styles.emptySubtext}>Run a speed test to record metrics</Text>
             </View>
           ) : (
             <FlatList
@@ -128,17 +140,15 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) 
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    backgroundColor: 'rgba(15, 23, 42, 0.4)',
     justifyContent: 'flex-end',
   },
   container: {
-    backgroundColor: '#0F172A',
+    backgroundColor: '#F4F6FA',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     height: '80%',
     paddingBottom: 24,
-    borderWidth: 1,
-    borderColor: '#1E293B',
   },
   header: {
     flexDirection: 'row',
@@ -147,19 +157,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 18,
     paddingBottom: 14,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     borderBottomWidth: 1,
-    borderBottomColor: '#1E293B',
+    borderBottomColor: '#E8EDF2',
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
-    color: '#F8FAFC',
+    color: '#0F172A',
   },
   closeBtn: {
     padding: 6,
   },
   closeBtnText: {
-    color: '#94A3B8',
+    color: '#64748B',
     fontSize: 18,
     fontWeight: '700',
   },
@@ -167,68 +180,62 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   card: {
-    backgroundColor: '#1E293B',
+    backgroundColor: '#FFFFFF',
     borderRadius: 14,
-    padding: 14,
+    padding: 12,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#E8EDF2',
   },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   networkBadge: {
-    backgroundColor: 'rgba(6, 182, 212, 0.15)',
+    backgroundColor: '#CCFBF1',
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical: 2,
     borderRadius: 6,
   },
   networkText: {
-    color: '#06B6D4',
+    color: '#0F766E',
     fontSize: 11,
     fontWeight: '700',
   },
   timeText: {
-    color: '#94A3B8',
+    color: '#64748B',
     fontSize: 12,
   },
   statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    alignItems: 'center',
   },
   statCol: {
-    flex: 1,
-  },
-  statLabel: {
-    fontSize: 10,
-    color: '#64748B',
-    fontWeight: '600',
-    marginBottom: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
   },
   statValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#F8FAFC',
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0F172A',
   },
   statUnit: {
-    fontSize: 11,
-    color: '#94A3B8',
-    fontWeight: '400',
+    fontSize: 10,
+    color: '#64748B',
   },
   locationRow: {
     borderTopWidth: 1,
-    borderTopColor: '#334155',
+    borderTopColor: '#F1F5F9',
     paddingTop: 6,
-    marginTop: 4,
+    marginTop: 6,
   },
   locationText: {
     fontSize: 11,
-    color: '#94A3B8',
-    fontFamily: 'Courier',
+    color: '#64748B',
   },
   emptyContainer: {
     flex: 1,
@@ -237,13 +244,13 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   emptyText: {
-    color: '#94A3B8',
-    fontSize: 16,
+    color: '#0F172A',
+    fontSize: 15,
     fontWeight: '600',
-    marginBottom: 6,
+    marginBottom: 4,
   },
   emptySubtext: {
     color: '#64748B',
-    fontSize: 13,
+    fontSize: 12,
   },
 });

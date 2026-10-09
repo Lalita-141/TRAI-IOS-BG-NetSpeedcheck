@@ -6,8 +6,9 @@ import {
   TouchableOpacity,
   View,
   Alert,
+  ActivityIndicator,
+  SafeAreaView,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppConfig, Sample } from './src/types';
 import { getConfig } from './src/config';
 import { monitorService, MonitorStatus } from './src/services/monitorService';
@@ -19,6 +20,15 @@ import { SpeedDashboardView } from './src/components/SpeedDashboardView';
 import { CoverageMapView } from './src/components/CoverageMapView';
 import { HistoryView } from './src/components/HistoryView';
 import { SettingsView } from './src/components/SettingsView';
+import {
+  BoltBadgeIcon,
+  CloudCheckIcon,
+  CloudUploadIcon,
+  LightningIcon,
+  MapNavIcon,
+  HistoryNavIcon,
+  SettingsNavIcon,
+} from './src/components/Icons';
 
 type TabType = 'SPEED' | 'MAP' | 'HISTORY' | 'SETTINGS';
 
@@ -118,123 +128,169 @@ export default function App() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
-      <StatusBar barStyle="light-content" />
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="dark-content" />
 
-      {/* Top Header Bar */}
-      <View style={styles.topBar}>
-        <View style={styles.brandContainer}>
-          <View style={styles.logoIcon}>
-            <Text style={styles.logoText}>⚡</Text>
+        {/* Top Header Bar (Matching EXACT Theme Mockup) */}
+        <View style={styles.topBar}>
+          <View style={styles.brandContainer}>
+            <View style={styles.logoIcon}>
+              <BoltBadgeIcon size={20} color="#F59E0B" />
+            </View>
+            <View>
+              <Text style={styles.appTitle}>TRAI Speed Monitor</Text>
+              <View style={styles.statusIndicatorRow}>
+                <View
+                  style={[
+                    styles.statusDot,
+                    status.isRunning ? styles.statusDotActive : styles.statusDotIdle,
+                  ]}
+                />
+                <Text style={styles.statusSubtitle}>
+                  {status.isRunning ? 'Monitoring Active' : 'Monitoring Idle'}
+                </Text>
+              </View>
+            </View>
           </View>
-          <View>
-            <Text style={styles.appTitle}>TRAI SPEED MONITOR</Text>
-            <Text style={styles.serverSubtitle} numberOfLines={1}>
-              {config?.serverUrl || 'https://140-245-3-81.sslip.io'}
-            </Text>
-          </View>
+
+          {/* Sync Pill (☁ All Synced / X Pending) */}
+          <TouchableOpacity
+            style={[
+              styles.syncPill,
+              status.pendingCount > 0 ? styles.syncPillPending : styles.syncPillSynced,
+            ]}
+            onPress={handleSyncPending}
+            disabled={isSyncing}
+            activeOpacity={0.8}>
+            {isSyncing ? (
+              <ActivityIndicator size="small" color="#00A389" />
+            ) : status.pendingCount > 0 ? (
+              <>
+                <CloudUploadIcon size={14} color="#D97706" />
+                <Text style={styles.syncPillPendingText}>{status.pendingCount} Pending</Text>
+              </>
+            ) : (
+              <>
+                <CloudCheckIcon size={14} color="#00A389" />
+                <Text style={styles.syncPillSyncedText}>All Synced</Text>
+              </>
+            )}
+          </TouchableOpacity>
         </View>
 
-        {/* Quick Sync / Status Header Pill */}
-        <TouchableOpacity
-          style={[
-            styles.statusPill,
-            status.isRunning ? styles.statusPillActive : styles.statusPillIdle,
-          ]}
-          onPress={handleToggleMonitoring}>
-          <View
-            style={[
-              styles.statusPillDot,
-              { backgroundColor: status.isRunning ? '#10B981' : '#64748B' },
-            ]}
-          />
-          <Text style={styles.statusPillText}>
-            {status.isRunning ? 'AUTO ON' : 'AUTO OFF'}
-          </Text>
-        </TouchableOpacity>
-      </View>
+        {/* Main Screen Content */}
+        <View style={styles.tabContentContainer}>
+          {currentTab === 'SPEED' && (
+            <SpeedDashboardView
+              config={config}
+              status={status}
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              onToggleMonitoring={handleToggleMonitoring}
+              onTestNow={handleTestNow}
+            />
+          )}
 
-      {/* Main Tab Screen Content */}
-      <View style={styles.tabContentContainer}>
-        {currentTab === 'SPEED' && (
-          <SpeedDashboardView
-            config={config}
-            status={status}
-            refreshing={refreshing}
-            isSyncing={isSyncing}
-            onRefresh={onRefresh}
-            onToggleMonitoring={handleToggleMonitoring}
-            onTestNow={handleTestNow}
-            onSyncPending={handleSyncPending}
-          />
-        )}
+          {currentTab === 'MAP' && (
+            <CoverageMapView
+              samples={samplesHistory}
+              currentLocation={currentLoc}
+              onRefresh={loadData}
+              onNavigateHistory={() => setCurrentTab('HISTORY')}
+            />
+          )}
 
-        {currentTab === 'MAP' && (
-          <CoverageMapView
-            samples={samplesHistory}
-            currentLocation={currentLoc}
-            onRefresh={loadData}
-          />
-        )}
+          {currentTab === 'HISTORY' && (
+            <HistoryView
+              samples={samplesHistory}
+              onRefresh={loadData}
+              onNavigateTab={tab => setCurrentTab(tab)}
+            />
+          )}
 
-        {currentTab === 'HISTORY' && (
-          <HistoryView
-            samples={samplesHistory}
-            onRefresh={loadData}
-          />
-        )}
+          {currentTab === 'SETTINGS' && (
+            <SettingsView
+              onConfigChanged={cfg => setConfig(cfg)}
+            />
+          )}
+        </View>
 
-        {currentTab === 'SETTINGS' && (
-          <SettingsView
-            onConfigChanged={cfg => setConfig(cfg)}
-          />
-        )}
-      </View>
+        {/* Bottom Navigation Bar (Matching Mockup with Speed, Map, History, Settings) */}
+        <View style={styles.bottomNav}>
+          <TouchableOpacity
+            style={styles.navItem}
+            onPress={() => setCurrentTab('SPEED')}
+            activeOpacity={0.7}>
+            <LightningIcon
+              size={22}
+              color={currentTab === 'SPEED' ? '#00A389' : '#94A3B8'}
+            />
+            <Text
+              style={[
+                styles.navLabel,
+                currentTab === 'SPEED' && styles.navLabelActive,
+              ]}>
+              Speed
+            </Text>
+          </TouchableOpacity>
 
-      {/* TRAI Style Bottom Navigation Bar */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity
-          style={[styles.navItem, currentTab === 'SPEED' && styles.navItemActive]}
-          onPress={() => setCurrentTab('SPEED')}>
-          <Text style={styles.navIcon}>⚡</Text>
-          <Text style={[styles.navLabel, currentTab === 'SPEED' && styles.navLabelActive]}>
-            SPEED
-          </Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.navItem}
+            onPress={() => {
+              setCurrentTab('MAP');
+              loadData();
+            }}
+            activeOpacity={0.7}>
+            <MapNavIcon
+              size={22}
+              color={currentTab === 'MAP' ? '#00A389' : '#94A3B8'}
+            />
+            <Text
+              style={[
+                styles.navLabel,
+                currentTab === 'MAP' && styles.navLabelActive,
+              ]}>
+              Map
+            </Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.navItem, currentTab === 'MAP' && styles.navItemActive]}
-          onPress={() => {
-            setCurrentTab('MAP');
-            loadData();
-          }}>
-          <Text style={styles.navIcon}>🗺️</Text>
-          <Text style={[styles.navLabel, currentTab === 'MAP' && styles.navLabelActive]}>
-            MAP
-          </Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.navItem}
+            onPress={() => {
+              setCurrentTab('HISTORY');
+              loadData();
+            }}
+            activeOpacity={0.7}>
+            <HistoryNavIcon
+              size={22}
+              color={currentTab === 'HISTORY' ? '#00A389' : '#94A3B8'}
+            />
+            <Text
+              style={[
+                styles.navLabel,
+                currentTab === 'HISTORY' && styles.navLabelActive,
+              ]}>
+              History
+            </Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.navItem, currentTab === 'HISTORY' && styles.navItemActive]}
-          onPress={() => {
-            setCurrentTab('HISTORY');
-            loadData();
-          }}>
-          <Text style={styles.navIcon}>📊</Text>
-          <Text style={[styles.navLabel, currentTab === 'HISTORY' && styles.navLabelActive]}>
-            HISTORY
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.navItem, currentTab === 'SETTINGS' && styles.navItemActive]}
-          onPress={() => setCurrentTab('SETTINGS')}>
-          <Text style={styles.navIcon}>⚙️</Text>
-          <Text style={[styles.navLabel, currentTab === 'SETTINGS' && styles.navLabelActive]}>
-            SETTINGS
-          </Text>
-        </TouchableOpacity>
-      </View>
+          <TouchableOpacity
+            style={styles.navItem}
+            onPress={() => setCurrentTab('SETTINGS')}
+            activeOpacity={0.7}>
+            <SettingsNavIcon
+              size={22}
+              color={currentTab === 'SETTINGS' ? '#00A389' : '#94A3B8'}
+            />
+            <Text
+              style={[
+                styles.navLabel,
+                currentTab === 'SETTINGS' && styles.navLabelActive,
+              ]}>
+              Settings
+            </Text>
+          </TouchableOpacity>
+        </View>
     </SafeAreaView>
   );
 }
@@ -242,17 +298,16 @@ export default function App() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0B0F19',
+    backgroundColor: '#F4F6FA',
   },
   topBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: 6,
+    paddingTop: 8,
     paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1E293B',
+    backgroundColor: '#F4F6FA',
   },
   brandContainer: {
     flexDirection: 'row',
@@ -260,94 +315,96 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   logoIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 8,
-    backgroundColor: 'rgba(6, 182, 212, 0.15)',
-    borderWidth: 1,
-    borderColor: '#06B6D4',
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#0F172A',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 8,
-  },
-  logoText: {
-    fontSize: 18,
+    marginRight: 10,
   },
   appTitle: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '800',
-    color: '#F8FAFC',
-    letterSpacing: 1,
+    color: '#0F172A',
+    letterSpacing: -0.2,
   },
-  serverSubtitle: {
-    fontSize: 10,
-    color: '#64748B',
-    marginTop: 1,
-    maxWidth: 170,
-  },
-  statusPill: {
+  statusIndicatorRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 16,
-    borderWidth: 1,
+    marginTop: 2,
   },
-  statusPillActive: {
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-    borderColor: '#10B981',
-  },
-  statusPillIdle: {
-    backgroundColor: '#1E293B',
-    borderColor: '#334155',
-  },
-  statusPillDot: {
+  statusDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
     marginRight: 5,
   },
-  statusPillText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#F8FAFC',
-    letterSpacing: 0.5,
+  statusDotActive: {
+    backgroundColor: '#10B981',
+  },
+  statusDotIdle: {
+    backgroundColor: '#10B981',
+  },
+  statusSubtitle: {
+    fontSize: 11,
+    color: '#64748B',
+    fontWeight: '500',
+  },
+  syncPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    borderWidth: 1,
+    gap: 5,
+  },
+  syncPillSynced: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#A7F3D0',
+  },
+  syncPillPending: {
+    backgroundColor: '#FEF3C7',
+    borderColor: '#FDE68A',
+  },
+  syncPillSyncedText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#00A389',
+  },
+  syncPillPendingText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#D97706',
   },
   tabContentContainer: {
     flex: 1,
   },
   bottomNav: {
     flexDirection: 'row',
-    backgroundColor: '#131B2E',
+    backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
-    borderTopColor: '#1E293B',
-    paddingVertical: 6,
-    paddingBottom: 8,
+    borderTopColor: '#E8EDF2',
+    paddingTop: 8,
+    paddingBottom: 6,
     justifyContent: 'space-around',
     alignItems: 'center',
   },
   navItem: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 4,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-  },
-  navItemActive: {
-    backgroundColor: 'rgba(6, 182, 212, 0.12)',
-  },
-  navIcon: {
-    fontSize: 20,
-    marginBottom: 2,
+    paddingVertical: 2,
+    paddingHorizontal: 16,
   },
   navLabel: {
     fontSize: 10,
-    fontWeight: '700',
-    color: '#64748B',
-    letterSpacing: 0.6,
+    fontWeight: '600',
+    color: '#94A3B8',
+    marginTop: 4,
   },
   navLabelActive: {
-    color: '#06B6D4',
-    fontWeight: '800',
+    color: '#00A389',
+    fontWeight: '700',
   },
 });

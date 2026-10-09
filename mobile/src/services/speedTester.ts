@@ -63,7 +63,7 @@ export async function resolvePublicISP(forceFresh: boolean = false): Promise<str
         }
       }
     }
-  } catch (err) {
+  } catch {
     // Non-blocking fallback
   }
   return null;

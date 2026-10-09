@@ -7,7 +7,9 @@ interface MetricCardProps {
   unit?: string;
   subtitle?: string;
   accentColor?: string;
+  iconBgColor?: string;
   badge?: string;
+  icon?: React.ReactNode;
 }
 
 export const MetricCard: React.FC<MetricCardProps> = ({
@@ -15,29 +17,39 @@ export const MetricCard: React.FC<MetricCardProps> = ({
   value,
   unit,
   subtitle,
-  accentColor = '#06B6D4',
+  accentColor = '#00A389',
+  iconBgColor,
   badge,
+  icon,
 }) => {
+  const bgCircle = iconBgColor || `${accentColor}18`;
+
   return (
     <View style={styles.card}>
-      <View style={styles.headerRow}>
-        <View style={styles.titleContainer}>
-          <View style={[styles.accentIndicator, { backgroundColor: accentColor }]} />
-          <Text style={styles.title}>{title}</Text>
-        </View>
-        {badge ? (
-          <View style={[styles.badge, { backgroundColor: accentColor + '20' }]}>
-            <Text style={[styles.badgeText, { color: accentColor }]}>{badge}</Text>
+      <View style={styles.topRow}>
+        {icon ? (
+          <View style={[styles.iconCircle, { backgroundColor: bgCircle }]}>
+            {icon}
           </View>
-        ) : null}
+        ) : (
+          <View style={[styles.dotIndicator, { backgroundColor: accentColor }]} />
+        )}
+        <View style={styles.titleArea}>
+          <Text style={styles.title} numberOfLines={1}>{title}</Text>
+          {badge ? (
+            <View style={[styles.badge, { backgroundColor: '#ECFDF5' }]}>
+              <Text style={styles.badgeText}>{badge}</Text>
+            </View>
+          ) : null}
+        </View>
       </View>
 
       <View style={styles.valueRow}>
-        <Text style={styles.value}>{value}</Text>
+        <Text style={styles.value} numberOfLines={1}>{value}</Text>
         {unit ? <Text style={styles.unit}>{unit}</Text> : null}
       </View>
 
-      {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+      {subtitle ? <Text style={styles.subtitle} numberOfLines={1}>{subtitle}</Text> : null}
     </View>
   );
 };
@@ -46,40 +58,47 @@ const styles = StyleSheet.create({
   card: {
     flex: 1,
     minWidth: '45%',
-    backgroundColor: '#131B2E',
+    backgroundColor: '#FFFFFF',
     borderRadius: 16,
     padding: 14,
-    margin: 6,
+    margin: 5,
     borderWidth: 1,
-    borderColor: '#1E293B',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+    borderColor: '#E8EDF2',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
     shadowRadius: 6,
-    elevation: 4,
+    elevation: 2,
   },
-  headerRow: {
+  topRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
   },
-  titleContainer: {
-    flexDirection: 'row',
+  iconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
   },
-  accentIndicator: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginRight: 6,
+  dotIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  titleArea: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   title: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#94A3B8',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
+    color: '#64748B',
   },
   badge: {
     paddingHorizontal: 6,
@@ -89,26 +108,29 @@ const styles = StyleSheet.create({
   badgeText: {
     fontSize: 10,
     fontWeight: '700',
+    color: '#059669',
   },
   valueRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
+    marginTop: 2,
   },
   value: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: '800',
-    color: '#F8FAFC',
+    color: '#0F172A',
     fontVariant: ['tabular-nums'],
   },
   unit: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     color: '#64748B',
     marginLeft: 4,
   },
   subtitle: {
     fontSize: 11,
-    color: '#64748B',
-    marginTop: 4,
+    color: '#94A3B8',
+    marginTop: 3,
+    fontWeight: '500',
   },
 });

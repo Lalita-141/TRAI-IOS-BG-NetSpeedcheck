@@ -19,27 +19,27 @@ export const SpeedGauge: React.FC<SpeedGaugeProps> = ({
   phase = 'idle',
   isTesting = false,
 }) => {
-  const size = 200;
+  const size = 210;
   const strokeWidth = 14;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  // We use 270 degrees arc (from 135 deg to 405 deg)
+  // 270 degree arc (from 135 deg to 405 deg)
   const arcLength = circumference * 0.75;
   const clampedValue = Math.min(Math.max(value, 0), maxValue);
   const strokeDashoffset = arcLength - (arcLength * clampedValue) / maxValue;
 
-  // Determine color based on phase
-  let primaryColor = '#06B6D4'; // Cyan default
-  let secondaryColor = '#3B82F6'; // Blue
+  // Determine accent color
+  let primaryColor = '#00A389'; // Teal
+  let secondaryColor = '#0284C7'; // Blue
   if (phase === 'ping') {
-    primaryColor = '#F59E0B'; // Amber
-    secondaryColor = '#EF4444';
+    primaryColor = '#D97706'; // Amber
+    secondaryColor = '#F59E0B';
   } else if (phase === 'upload') {
-    primaryColor = '#8B5CF6'; // Purple
-    secondaryColor = '#EC4899'; // Pink
+    primaryColor = '#7C3AED'; // Purple
+    secondaryColor = '#A855F7';
   } else if (phase === 'complete') {
-    primaryColor = '#10B981'; // Emerald
-    secondaryColor = '#06B6D4';
+    primaryColor = '#059669'; // Emerald
+    secondaryColor = '#00A389';
   } else if (phase === 'error') {
     primaryColor = '#EF4444';
     secondaryColor = '#DC2626';
@@ -54,8 +54,8 @@ export const SpeedGauge: React.FC<SpeedGaugeProps> = ({
             <Stop offset="100%" stopColor={secondaryColor} stopOpacity="1" />
           </LinearGradient>
           <LinearGradient id="trackGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-            <Stop offset="0%" stopColor="#1E293B" stopOpacity="0.8" />
-            <Stop offset="100%" stopColor="#0F172A" stopOpacity="0.8" />
+            <Stop offset="0%" stopColor="#E2E8F0" stopOpacity="0.9" />
+            <Stop offset="100%" stopColor="#EDF2F7" stopOpacity="0.9" />
           </LinearGradient>
         </Defs>
 
@@ -90,13 +90,13 @@ export const SpeedGauge: React.FC<SpeedGaugeProps> = ({
 
       {/* Center Reading */}
       <View style={styles.centerContent}>
-        <Text style={[styles.label, { color: primaryColor }]}>{label.toUpperCase()}</Text>
+        <Text style={styles.label}>{label.toUpperCase()}</Text>
         <Text style={styles.valueText}>
           {value > 0 ? value.toFixed(value >= 10 ? 1 : 2) : '--'}
         </Text>
         <Text style={styles.unitText}>{unit}</Text>
         {isTesting && (
-          <View style={[styles.pulseBadge, { backgroundColor: primaryColor + '20' }]}>
+          <View style={[styles.pulseBadge, { backgroundColor: primaryColor + '15' }]}>
             <View style={[styles.pulseDot, { backgroundColor: primaryColor }]} />
             <Text style={[styles.pulseText, { color: primaryColor }]}>TESTING</Text>
           </View>
@@ -110,7 +110,7 @@ const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: 12,
+    marginVertical: 4,
   },
   svg: {
     transform: [{ scaleX: 1 }],
@@ -123,19 +123,21 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 12,
     fontWeight: '700',
-    letterSpacing: 1.5,
+    letterSpacing: 1.2,
+    color: '#64748B',
     marginBottom: 4,
   },
   valueText: {
-    fontSize: 38,
+    fontSize: 40,
     fontWeight: '800',
-    color: '#FFFFFF',
+    color: '#0F172A',
     fontVariant: ['tabular-nums'],
+    letterSpacing: -0.5,
   },
   unitText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#94A3B8',
+    color: '#64748B',
     marginTop: -2,
   },
   pulseBadge: {
