@@ -5,8 +5,8 @@ Continuously measures network speed on iPhone and uploads it with location to a 
 ## Server
 ```
 cd server
-pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8000
+npm install
+npm start
 ```
 - `POST /v1/speed-samples` ingest (idempotent by sample id), `GET /v1/speed-samples` view
 - `/ping`, `/download?mb=2`, `/upload` are what the phone measures against
