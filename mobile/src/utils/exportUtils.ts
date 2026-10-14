@@ -72,7 +72,7 @@ export async function exportSamplesAsCSV(samples: Sample[]): Promise<boolean> {
   try {
     const csvContent = generateCSV(samples);
     const dateStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const filename = `TRAI_SpeedTest_History_${dateStr}.csv`;
+    const filename = `NetSpeed_History_${dateStr}.csv`;
 
     await Share.share(
       Platform.select({
@@ -115,7 +115,7 @@ export async function exportSamplesAsJSON(samples: Sample[]): Promise<boolean> {
       2
     );
     const dateStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const filename = `TRAI_SpeedTest_History_${dateStr}.json`;
+    const filename = `NetSpeed_History_${dateStr}.json`;
 
     await Share.share({
       title: filename,

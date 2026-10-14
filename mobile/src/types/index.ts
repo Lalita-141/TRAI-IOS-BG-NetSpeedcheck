@@ -5,8 +5,8 @@ export interface Sample {
   down_mbps: number | null;
   up_mbps: number | null;
   latency_ms: number | null;
-  jitter_ms: number | null; // TRAI QoS Jitter metric
-  packet_loss_pct: number | null; // TRAI Packet loss percentage
+  jitter_ms: number | null; // QoS Jitter metric
+  packet_loss_pct: number | null; // Packet loss percentage
   network: string | null; // 'wifi' | 'cellular' | 'ethernet' | 'other' | 'none'
   radio: string | null; // '5G' | '4G / LTE' | '3G' | '2G' etc.
   carrier: string | null; // 'Jio' | 'Airtel' | 'BSNL' | 'Vi' etc.

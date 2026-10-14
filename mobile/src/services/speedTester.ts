@@ -71,7 +71,7 @@ export async function resolvePublicISP(forceFresh: boolean = false): Promise<str
 
 export class SpeedTester {
   /**
-   * Measures latency, jitter, and packet loss using 5 round-trip HTTP probes (TRAI QoS Standard)
+   * Measures latency, jitter, and packet loss using 5 round-trip HTTP probes (Industry Standard QoS Probes)
    */
   async measureLatencyAndJitter(
     serverUrl: string
@@ -301,7 +301,7 @@ export class SpeedTester {
       throw new Error('Wi-Fi only mode enabled');
     }
 
-    // Step 1: Ping / Latency & Jitter (TRAI QoS probes)
+    // Step 1: Ping / Latency & Jitter (QoS probes)
     onProgress?.({
       phase: 'ping',
       message: 'Measuring QoS latency, jitter & packet loss...',

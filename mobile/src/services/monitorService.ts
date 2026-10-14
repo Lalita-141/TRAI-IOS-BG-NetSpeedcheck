@@ -136,8 +136,8 @@ class MonitorService {
         };
 
         const bgOptions = {
-          taskName: 'TRAISpeedMonitor',
-          taskTitle: 'TRAI Speed Monitor Active',
+          taskName: 'NetSpeedMonitor',
+          taskTitle: 'NetSpeed Monitor Active',
           taskDesc: `Logging QoS & coverage every ${intervalSeconds}s in background`,
           taskIcon: {
             name: 'ic_launcher',
@@ -240,7 +240,7 @@ class MonitorService {
         this.notify(progress);
       });
 
-      // Construct Sample with TRAI QoS parameters
+      // Construct Sample with QoS parameters
       const sample: Sample = {
         id: generateUUID(),
         device_id: deviceId,

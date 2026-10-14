@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>mobile</string>
+	<string>NetSpeed</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -28,22 +28,19 @@
 	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Speed Monitor measures network speed and logs signal performance with your current location.</string>
+	<string>NetSpeed Monitor measures network speed and logs signal performance with your current location.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Speed Monitor tracks coverage and network performance periodically in the background.</string>
+	<string>NetSpeed Monitor uses your background location to map network coverage, detect signal dead zones along your travel routes, and record QoS performance on your Coverage Map.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
-	<string>Speed Monitor tracks coverage and network performance periodically in the background.</string>
+	<string>NetSpeed Monitor uses your background location to map network coverage, detect signal dead zones along your travel routes, and record QoS performance on your Coverage Map.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
 		<string>fetch</string>
-		<string>processing</string>
 	</array>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>

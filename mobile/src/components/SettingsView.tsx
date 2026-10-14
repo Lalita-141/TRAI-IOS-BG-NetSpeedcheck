@@ -8,6 +8,7 @@ import {
   ScrollView,
   StyleSheet,
   Alert,
+  Linking,
 } from 'react-native';
 import { AppConfig } from '../types';
 import { getConfig, saveConfig, getDeviceId } from '../config';
@@ -267,6 +268,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
         </View>
       </View>
 
+      {/* Privacy Policy & Compliance */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Privacy & Compliance</Text>
+        <Text style={styles.helperText}>
+          Review how your network diagnostics, QoS metrics, and location data are handled:
+        </Text>
+        <TouchableOpacity
+          style={styles.privacyPolicyBtn}
+          onPress={() => Linking.openURL('https://hareandturtle.ai/privacy-policy.html')}
+          activeOpacity={0.8}>
+          <Text style={styles.privacyPolicyBtnText}>🔒 View Company Privacy Policy</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Device Info */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Device Telemetry</Text>
@@ -417,6 +432,20 @@ const styles = StyleSheet.create({
   },
   exportActionBtnText: {
     color: '#0284C7',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  privacyPolicyBtn: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  privacyPolicyBtnText: {
+    color: '#16A34A',
     fontWeight: '700',
     fontSize: 12,
   },

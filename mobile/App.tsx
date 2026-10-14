@@ -8,6 +8,7 @@ import {
   Alert,
   ActivityIndicator,
   SafeAreaView,
+  Image,
 } from 'react-native';
 import { AppConfig, Sample } from './src/types';
 import { getConfig } from './src/config';
@@ -21,7 +22,6 @@ import { CoverageMapView } from './src/components/CoverageMapView';
 import { HistoryView } from './src/components/HistoryView';
 import { SettingsView } from './src/components/SettingsView';
 import {
-  BoltBadgeIcon,
   CloudCheckIcon,
   CloudUploadIcon,
   LightningIcon,
@@ -134,11 +134,12 @@ export default function App() {
         {/* Top Header Bar (Matching EXACT Theme Mockup) */}
         <View style={styles.topBar}>
           <View style={styles.brandContainer}>
-            <View style={styles.logoIcon}>
-              <BoltBadgeIcon size={20} color="#F59E0B" />
-            </View>
+            <Image
+              source={require('./src/assets/app-icon.png')}
+              style={styles.logoImage}
+            />
             <View>
-              <Text style={styles.appTitle}>TRAI Speed Monitor</Text>
+              <Text style={styles.appTitle}>NetSpeed Monitor</Text>
               <View style={styles.statusIndicatorRow}>
                 <View
                   style={[
@@ -314,13 +315,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
   },
-  logoIcon: {
+  logoImage: {
     width: 36,
     height: 36,
-    borderRadius: 10,
-    backgroundColor: '#0F172A',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderRadius: 9,
     marginRight: 10,
   },
   appTitle: {
