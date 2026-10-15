@@ -9,10 +9,13 @@ import {
   ScrollView,
   StyleSheet,
   Alert,
+  Linking,
+  ActivityIndicator,
 } from 'react-native';
 import { AppConfig } from '../types';
 import { getConfig, saveConfig, getDeviceId } from '../config';
 import { sampleStore } from '../services/sampleStore';
+import { uploader } from '../services/uploader';
 
 interface SettingsModalProps {
   visible: boolean;
@@ -31,6 +34,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [uploadMB, setUploadMB] = useState(1);
   const [wifiOnly, setWifiOnly] = useState(false);
   const [deviceId, setDeviceId] = useState('');
+  const [isDeletingServerData, setIsDeletingServerData] = useState(false);
 
   useEffect(() => {
     if (visible) {
@@ -65,6 +69,70 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
     onConfigChanged(updated);
     onClose();
+  };
+
+  const handleEmailDeletionRequest = () => {
+    const email = 'privacy@hareandturtle.ai';
+    const subject = encodeURIComponent('Data Deletion Request - NetSpeed QoS Monitor');
+    const body = encodeURIComponent(
+      `Hello Privacy Team,\n\nIn accordance with NetSpeed QoS Monitor data retention and deletion policies, I request the deletion of all server-side measurement records associated with my device:\n\nDevice UUID: ${deviceId}\n\nThank you.`
+    );
+    const mailtoUrl = `mailto:${email}?subject=${subject}&body=${body}`;
+
+    Linking.canOpenURL(mailtoUrl)
+      .then(supported => {
+        if (supported) {
+          Linking.openURL(mailtoUrl);
+        } else {
+          Alert.alert(
+            'Data Deletion Request',
+            `Please email privacy@hareandturtle.ai with your Device UUID:\n\n${deviceId}\n\nWe will process your request promptly.`,
+            [{ text: 'OK' }]
+          );
+        }
+      })
+      .catch(() => {
+        Alert.alert(
+          'Data Deletion Request',
+          `Please email privacy@hareandturtle.ai with your Device UUID:\n\n${deviceId}`,
+          [{ text: 'OK' }]
+        );
+      });
+  };
+
+  const handleServerDataDeletion = () => {
+    Alert.alert(
+      'Delete Backend Records',
+      `Permanently delete all server-side measurement records for Device UUID:\n\n${deviceId}?\n\nRecords older than 90 days are already automatically deleted. This action will immediately purge any remaining active records.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: '🗑 Delete From Server',
+          style: 'destructive',
+          onPress: async () => {
+            setIsDeletingServerData(true);
+            try {
+              const res = await uploader.deleteServerRecordsForDevice(deviceId);
+              if (res.success) {
+                Alert.alert(
+                  'Server Deletion Complete',
+                  `Successfully deleted ${res.count ?? 0} server record(s) for this device.`
+                );
+              } else {
+                Alert.alert(
+                  'Deletion Notice',
+                  `${res.error || 'Unable to connect to server'}.\n\nYou can also submit a verified request to privacy@hareandturtle.ai.`
+                );
+              }
+            } catch (err: any) {
+              Alert.alert('Error', err?.message || 'Server deletion request failed.');
+            } finally {
+              setIsDeletingServerData(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleClearData = () => {
@@ -202,6 +270,60 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <View style={styles.section}>
               <Text style={styles.label}>Device UUID</Text>
               <Text style={styles.deviceIdText}>{deviceId || 'Loading...'}</Text>
+            </View>
+
+            {/* Data Retention and Deletion (Apple Compliance) */}
+            <View style={styles.section}>
+              <View style={styles.retentionHeaderRow}>
+                <Text style={styles.retentionSectionTitle}>Data Retention & Deletion</Text>
+                <View style={styles.retentionBadge}>
+                  <Text style={styles.retentionBadgeText}>90 Days Retention</Text>
+                </View>
+              </View>
+
+              <Text style={styles.retentionSubheading}>Backend Retention Policy</Text>
+              <Text style={styles.retentionBody}>
+                NetSpeed QoS Monitor retains network measurement records on its backend for up to <Text style={styles.boldText}>90 days</Text> from the date they are recorded. Records older than this period are automatically deleted through our data-retention process.
+              </Text>
+
+              <Text style={[styles.retentionSubheading, styles.marginTopSmall]}>User Deletion Requests</Text>
+              <Text style={styles.retentionBody}>
+                Users may request deletion of their measurement records by contacting <Text style={styles.linkText} onPress={handleEmailDeletionRequest}>privacy@hareandturtle.ai</Text>. We process verified requests in accordance with applicable law.
+              </Text>
+
+              <View style={styles.noticeBox}>
+                <Text style={styles.noticeBoxText}>
+                  ⚠️ <Text style={styles.boldText}>Notice:</Text> Deleting the App does not automatically delete records already transmitted to our backend. You may request server-side record deletion using the button below or via email.
+                </Text>
+              </View>
+
+              <View style={styles.retentionActionRow}>
+                <TouchableOpacity
+                  style={styles.retentionActionBtn}
+                  onPress={handleEmailDeletionRequest}
+                  activeOpacity={0.8}>
+                  <Text style={styles.retentionActionBtnText}>✉️ Email Deletion</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.retentionActionBtn, styles.retentionWipeBtn]}
+                  onPress={handleServerDataDeletion}
+                  disabled={isDeletingServerData}
+                  activeOpacity={0.8}>
+                  {isDeletingServerData ? (
+                    <ActivityIndicator size="small" color="#DC2626" />
+                  ) : (
+                    <Text style={styles.retentionWipeBtnText}>🗑 Wipe Server Logs</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={styles.privacyPolicyBtn}
+                onPress={() => Linking.openURL('https://hareandturtle.ai/privacy-policy.html')}
+                activeOpacity={0.8}>
+                <Text style={styles.privacyPolicyBtnText}>🔒 View Privacy Policy</Text>
+              </TouchableOpacity>
             </View>
 
             {/* Reset */}
@@ -377,5 +499,110 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '700',
     fontSize: 15,
+  },
+  retentionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  retentionSectionTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  retentionBadge: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#A7F3D0',
+    borderWidth: 1,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+  },
+  retentionBadgeText: {
+    color: '#00A389',
+    fontWeight: '700',
+    fontSize: 10,
+  },
+  retentionSubheading: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#1E293B',
+    marginBottom: 2,
+  },
+  retentionBody: {
+    fontSize: 11,
+    color: '#475569',
+    lineHeight: 15,
+  },
+  boldText: {
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  linkText: {
+    color: '#00A389',
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
+  marginTopSmall: {
+    marginTop: 8,
+  },
+  noticeBox: {
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 8,
+    padding: 8,
+    marginTop: 8,
+  },
+  noticeBoxText: {
+    fontSize: 10,
+    color: '#92400E',
+    lineHeight: 14,
+  },
+  retentionActionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+    marginBottom: 8,
+  },
+  retentionActionBtn: {
+    flex: 1,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  retentionActionBtnText: {
+    color: '#334155',
+    fontWeight: '600',
+    fontSize: 11,
+    textAlign: 'center',
+  },
+  retentionWipeBtn: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
+  retentionWipeBtnText: {
+    color: '#DC2626',
+    fontWeight: '700',
+    fontSize: 11,
+    textAlign: 'center',
+  },
+  privacyPolicyBtn: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  privacyPolicyBtnText: {
+    color: '#16A34A',
+    fontWeight: '700',
+    fontSize: 11,
   },
 });

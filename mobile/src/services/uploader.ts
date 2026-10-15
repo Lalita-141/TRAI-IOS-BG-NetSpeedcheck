@@ -83,6 +83,31 @@ class Uploader {
       this.busy = false;
     }
   }
+
+  /**
+   * Requests immediate deletion of all server-side records associated with a device ID
+   */
+  async deleteServerRecordsForDevice(deviceId: string): Promise<{ success: boolean; count?: number; error?: string }> {
+    try {
+      const config = await getConfig();
+      const serverUrl = config.serverUrl.replace(/\/+$/, '');
+      const res = await fetch(`${serverUrl}/v1/speed-samples/device/${encodeURIComponent(deviceId)}`, {
+        method: 'DELETE',
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+
+      if (!res.ok) {
+        return { success: false, error: `Server responded with HTTP ${res.status}` };
+      }
+
+      const data = await res.json();
+      return { success: true, count: data.deleted_count };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Network request failed' };
+    }
+  }
 }
 
 export const uploader = new Uploader();

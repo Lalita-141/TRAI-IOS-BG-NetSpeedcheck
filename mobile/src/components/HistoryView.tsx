@@ -349,6 +349,32 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         </Text>
       </View>
 
+      {/* Backend Retention Disclosure Banner (Apple Review Compliance) */}
+      <TouchableOpacity
+        style={styles.retentionInfoStrip}
+        activeOpacity={0.75}
+        onPress={() => {
+          Alert.alert(
+            'Data Retention Policy',
+            'NetSpeed QoS Monitor retains network measurement records on its backend for up to 90 days from the date they are recorded. Records older than this period are automatically deleted through our automated data-retention process.\n\nUsers may request deletion of their measurement records at any time by contacting privacy@hareandturtle.ai.',
+            [
+              { text: 'Close', style: 'cancel' },
+              ...(onNavigateTab
+                ? [
+                    {
+                      text: 'Settings & Deletion',
+                      onPress: () => onNavigateTab('SETTINGS'),
+                    },
+                  ]
+                : []),
+            ]
+          );
+        }}>
+        <Text style={styles.retentionInfoText}>
+          ⏱️ Backend records auto-delete after 90 days • <Text style={styles.retentionInfoLink}>Policy Details</Text>
+        </Text>
+      </TouchableOpacity>
+
       {/* Capacity Strip Warning (if full) */}
       {capacityInfo.isFull && (
         <View style={styles.capacityWarning}>
@@ -532,6 +558,30 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#94A3B8',
     fontWeight: '500',
+  },
+  retentionInfoStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 8,
+    marginHorizontal: 16,
+    marginTop: 2,
+    marginBottom: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  retentionInfoText: {
+    fontSize: 11,
+    color: '#15803D',
+    fontWeight: '600',
+  },
+  retentionInfoLink: {
+    color: '#00A389',
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
   capacityWarning: {
     flexDirection: 'row',
