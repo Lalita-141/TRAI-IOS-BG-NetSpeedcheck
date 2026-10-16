@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   Switch,
   ScrollView,
@@ -52,15 +51,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
   };
 
   const handleSave = async () => {
-    if (!serverUrl.trim().startsWith('http://') && !serverUrl.trim().startsWith('https://')) {
-      Alert.alert('Invalid URL', 'Server URL must start with http:// or https://');
-      return;
-    }
-
     sampleStore.setMaxHistoryLimit(maxHistoryLimit);
 
+    const config = await getConfig();
+    const activeServerUrl = serverUrl.trim() || config.serverUrl;
+
     const updated = await saveConfig({
-      serverUrl: serverUrl.trim(),
+      serverUrl: activeServerUrl,
       testIntervalSeconds: intervalSec,
       downloadMB,
       uploadMB,
@@ -197,28 +194,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
           <Text style={styles.successBannerText}>✓ Configuration Saved Successfully</Text>
         </View>
       )}
-
-      {/* Server Ingest URL */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Server Configuration</Text>
-        <Text style={styles.label}>FastAPI Ingest Endpoint</Text>
-        <TextInput
-          style={styles.input}
-          value={serverUrl}
-          onChangeText={setServerUrl}
-          placeholder="https://140-245-3-81.sslip.io"
-          placeholderTextColor="#94A3B8"
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        <View style={styles.presetRow}>
-          <TouchableOpacity
-            style={styles.presetBtn}
-            onPress={() => setServerUrl('https://140-245-3-81.sslip.io')}>
-            <Text style={styles.presetBtnText}>140-245-3-81.sslip.io (Oracle Cloud)</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
 
       {/* Testing Cadence */}
       <View style={styles.section}>
@@ -470,33 +445,6 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     marginTop: 5,
     lineHeight: 15,
-  },
-  input: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: '#0F172A',
-    fontSize: 14,
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-  },
-  presetRow: {
-    flexDirection: 'row',
-    marginTop: 8,
-  },
-  presetBtn: {
-    backgroundColor: '#F1F5F9',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  presetBtnText: {
-    color: '#00A389',
-    fontSize: 11,
-    fontWeight: '600',
   },
   buttonGroup: {
     flexDirection: 'row',

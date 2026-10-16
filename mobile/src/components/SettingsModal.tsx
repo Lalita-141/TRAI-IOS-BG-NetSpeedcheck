@@ -3,7 +3,6 @@ import {
   Modal,
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   Switch,
   ScrollView,
@@ -54,13 +53,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const handleSave = async () => {
-    if (!serverUrl.trim().startsWith('http://') && !serverUrl.trim().startsWith('https://')) {
-      Alert.alert('Invalid URL', 'Server URL must start with http:// or https://');
-      return;
-    }
+    const config = await getConfig();
+    const activeServerUrl = serverUrl.trim() || config.serverUrl;
 
     const updated = await saveConfig({
-      serverUrl: serverUrl.trim(),
+      serverUrl: activeServerUrl,
       testIntervalSeconds: intervalSec,
       downloadMB,
       uploadMB,
@@ -175,20 +172,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </View>
 
           <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
-            {/* Server URL */}
-            <View style={styles.section}>
-              <Text style={styles.label}>Server Ingest Endpoint</Text>
-              <TextInput
-                style={styles.input}
-                value={serverUrl}
-                onChangeText={setServerUrl}
-                placeholder="https://140-245-3-81.sslip.io"
-                placeholderTextColor="#94A3B8"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            </View>
-
             {/* Interval */}
             <View style={styles.section}>
               <Text style={styles.label}>Test Interval</Text>
@@ -408,16 +391,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#94A3B8',
     marginTop: 2,
-  },
-  input: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: '#0F172A',
-    fontSize: 14,
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
   },
   buttonGroup: {
     flexDirection: 'row',
