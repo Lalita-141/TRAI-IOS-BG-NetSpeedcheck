@@ -2,15 +2,24 @@
 
 Continuously measures network speed on iPhone and uploads it with location to a server.
 
-## Server
+## Server (Node.js & MySQL)
+```bash
+cd server
+npm install
+npm run dev   # or npm start
 ```
+- Configuration lives in `server/.env` (DB host, port, credentials, admin key).
+- Schema is in `server/schema.sql` (also auto-verified on startup).
+- `POST /v1/speed-samples` ingest (idempotent via `INSERT IGNORE`), `GET /v1/speed-samples` admin telemetry view.
+- `/ping`, `/download?mb=2`, `/upload` are the high-throughput speed test endpoints.
+- 90-day retention cleanup runs on startup and hourly via background worker.
+
+### Legacy Python Server (Optional)
+```bash
 cd server
 pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
-- `POST /v1/speed-samples` ingest (idempotent by sample id), `GET /v1/speed-samples` view
-- `/ping`, `/download?mb=2`, `/upload` are what the phone measures against
-- Data lives in `server/samples.db` (SQLite). Swap for Postgres/PostGIS/Timescale in production.
 
 ## React Native iOS App (`mobile/`)
 The full React Native implementation is in the [`mobile/`](file:///Users/rnt/Downloads/small-code/mobile) directory.
