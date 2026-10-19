@@ -19,6 +19,9 @@ export const LightningIcon: React.FC<IconProps> = ({ size = 20, color = '#00A389
   </Svg>
 );
 
+export const SpeedTestIcon = LightningIcon;
+
+
 export const BoltBadgeIcon: React.FC<IconProps> = ({ size = 18, color = '#F59E0B' }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Path
@@ -122,6 +125,12 @@ export const PinIcon: React.FC<IconProps> = ({ size = 18, color = '#0284C7' }) =
       strokeLinejoin="round"
     />
     <Circle cx="12" cy="9.5" r="2.8" fill={color} />
+  </Svg>
+);
+
+export const ChevronLeftIcon: React.FC<IconProps> = ({ size = 18, color = '#94A3B8' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Polyline points="15 6 9 12 15 18" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
   </Svg>
 );
 
@@ -230,3 +239,259 @@ export const TargetLocateIcon: React.FC<IconProps> = ({ size = 18, color = '#1E2
     <Line x1="19" y1="12" x2="22" y2="12" stroke={color} strokeWidth="2" strokeLinecap="round" />
   </Svg>
 );
+
+export const VideoBrowserTestIcon: React.FC<IconProps> = ({ size = 18, color = '#334155' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Rect x="2" y="5" width="13" height="14" rx="2.5" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    <Path d="M15 10L21 6.5V17.5L15 14" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+export const CoverageTestIcon: React.FC<IconProps> = ({ size = 18, color = '#334155' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Circle cx="12" cy="11" r="1.8" fill={color} />
+    <Path d="M12 13V20" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    <Path d="M9 8.5C7.2 10.3 7.2 13.2 9 15" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    <Path d="M15 8.5C16.8 10.3 16.8 13.2 15 15" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    <Path d="M6 5.5C2.8 8.7 2.8 14.3 6 17.5" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    <Path d="M18 5.5C21.2 8.7 21.2 14.3 18 17.5" stroke={color} strokeWidth="2" strokeLinecap="round" />
+  </Svg>
+);
+
+export const AdvanceTestsIcon: React.FC<IconProps> = ({ size = 18, color = '#334155' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Circle cx="12" cy="12" r="9" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    <Path d="M12 6.5V8.5" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    <Path d="M7.8 7.8L9.2 9.2" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    <Path d="M16.2 7.8L14.8 9.2" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    <Line x1="12" y1="12" x2="15.5" y2="8.5" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    <Circle cx="12" cy="12" r="2" fill={color} />
+  </Svg>
+);
+
+export const SignalBarsIcon: React.FC<IconProps> = ({ size = 14, color = '#10B981' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M4 18V20M9 14V20M14 10V20M19 6V20" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+  </Svg>
+);
+
+export const BackArrowIcon: React.FC<IconProps> = ({ size = 22, color = '#0F172A' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M19 12H5M5 12L12 19M5 12L12 5" stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+export const StepperLatencyIcon: React.FC<IconProps> = ({ size = 20, color = '#1E293B' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M5 9H19M19 9L15 5M19 9L15 13" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    <Path d="M19 15H5M5 15L9 11M5 15L9 19" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+export const StepperDownloadIcon: React.FC<IconProps> = ({ size = 20, color = '#1E293B' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M12 4V16M12 16L7 11M12 16L17 11" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    <Path d="M5 19H19" stroke={color} strokeWidth="2.2" strokeLinecap="round" />
+  </Svg>
+);
+
+export const StepperUploadIcon: React.FC<IconProps> = ({ size = 20, color = '#1E293B' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M12 20V8M12 8L7 13M12 8L17 13" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    <Path d="M5 5H19" stroke={color} strokeWidth="2.2" strokeLinecap="round" />
+  </Svg>
+);
+
+export const GlobeIcon: React.FC<IconProps> = ({ size = 16, color = '#64748B' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Circle cx="12" cy="12" r="9" stroke={color} strokeWidth="2" />
+    <Path d="M3 12H21" stroke={color} strokeWidth="1.8" />
+    <Path d="M12 3C14.5 6 16 9 16 12C16 15 14.5 18 12 21C9.5 18 8 15 8 12C8 9 9.5 6 12 3Z" stroke={color} strokeWidth="1.8" />
+  </Svg>
+);
+
+export const CalendarIcon: React.FC<IconProps> = ({ size = 16, color = '#64748B' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Rect x="3" y="4" width="18" height="17" rx="2" stroke={color} strokeWidth="2" />
+    <Line x1="16" y1="2" x2="16" y2="6" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    <Line x1="8" y1="2" x2="8" y2="6" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    <Line x1="3" y1="10" x2="21" y2="10" stroke={color} strokeWidth="1.8" />
+  </Svg>
+);
+
+export const ServerIcon: React.FC<IconProps> = ({ size = 16, color = '#64748B' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Rect x="2" y="3" width="20" height="7" rx="2" stroke={color} strokeWidth="2" />
+    <Rect x="2" y="14" width="20" height="7" rx="2" stroke={color} strokeWidth="2" />
+    <Line x1="6" y1="6.5" x2="6.01" y2="6.5" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+    <Line x1="6" y1="17.5" x2="6.01" y2="17.5" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+  </Svg>
+);
+
+export const MySpeedLogo: React.FC<{ width?: number; height?: number }> = ({
+  width = 180,
+  height = 50,
+}) => (
+  <Svg width={width} height={height} viewBox="0 0 240 60" fill="none">
+    {/* Speedometer Icon on left */}
+    <Path
+      d="M20 44C16.5 40 14 34.5 14 28C14 16.95 22.95 8 34 8C45.05 8 54 16.95 54 28C54 34.5 51.5 40 48 44"
+      stroke="#1E293B"
+      strokeWidth="4"
+      strokeLinecap="round"
+    />
+    {/* Speedometer Radial Ticks */}
+    <Line x1="20" y1="28" x2="25" y2="28" stroke="#0284C7" strokeWidth="2.5" strokeLinecap="round" />
+    <Line x1="24" y1="18" x2="28" y2="21" stroke="#0284C7" strokeWidth="2.5" strokeLinecap="round" />
+    <Line x1="34" y1="14" x2="34" y2="19" stroke="#0284C7" strokeWidth="2.5" strokeLinecap="round" />
+    <Line x1="44" y1="18" x2="40" y2="21" stroke="#0284C7" strokeWidth="2.5" strokeLinecap="round" />
+    {/* Gauge Needle */}
+    <Line x1="34" y1="30" x2="25" y2="17" stroke="#EF4444" strokeWidth="3" strokeLinecap="round" />
+    <Circle cx="34" cy="30" r="3.5" fill="#EF4444" />
+    {/* Trailing speed speed-marks behind gauge */}
+    <Line x1="48" y1="28" x2="56" y2="28" stroke="#1E293B" strokeWidth="2.5" strokeLinecap="round" />
+    <Line x1="47" y1="34" x2="54" y2="34" stroke="#1E293B" strokeWidth="2.5" strokeLinecap="round" />
+    <Line x1="45" y1="40" x2="51" y2="40" stroke="#1E293B" strokeWidth="2.5" strokeLinecap="round" />
+
+    {/* "My" in Dark Slate */}
+    <Path
+      d="M74 42V18H80L87 33L94 18H100V42H95V26L89 39H85L79 26V42H74Z"
+      fill="#0F172A"
+    />
+    <Path
+      d="M104 25L110 42H105L102 33L99 42H94L100 25H104ZM106 44L104 49H99L102 44H106Z"
+      fill="#0F172A"
+    />
+
+    {/* "Speed" in Amber / Yellow */}
+    <Path
+      d="M125 38C127 40 130 42 134 42C138 42 141 40 141 37C141 34 139 33 133 32C126 30 122 28 122 23C122 18 126 15 133 15C138 15 142 17 144 19L141 23C139 21 136 19 133 19C129 19 127 21 127 23C127 25 129 26 135 27C142 29 146 31 146 36C146 42 141 46 134 46C128 46 123 43 121 40L125 38Z"
+      fill="#F5A623"
+    />
+    <Path
+      d="M149 45V24H154V27C156 25 158 24 162 24C167 24 171 28 171 34C171 41 167 45 162 45C158 45 156 44 154 42V51H149V45ZM154 35C154 39 157 41 160 41C164 41 166 38 166 35C166 31 164 28 160 28C157 28 154 30 154 35Z"
+      fill="#F5A623"
+    />
+    <Path
+      d="M185 36H176C176 39 179 41 182 41C185 41 187 40 188 38L192 40C190 43 186 45 182 45C174 45 171 40 171 35C171 29 175 24 182 24C188 24 192 28 192 34V36H185ZM182 28C179 28 177 30 176 32H187C187 30 185 28 182 28Z"
+      fill="#F5A623"
+    />
+    <Path
+      d="M207 36H198C198 39 201 41 204 41C207 41 209 40 210 38L214 40C212 43 208 45 204 45C196 45 193 40 193 35C193 29 197 24 204 24C210 24 214 28 214 34V36H207ZM204 28C201 28 199 30 198 32H209C209 30 207 28 204 28Z"
+      fill="#F5A623"
+    />
+    <Path
+      d="M229 18V26C227 25 225 24 222 24C216 24 212 28 212 35C212 41 216 45 222 45C225 45 227 44 229 43V45H234V18H229ZM229 34C229 31 227 28 223 28C220 28 217 31 217 35C217 39 220 41 223 41C227 41 229 38 229 34Z"
+      fill="#F5A623"
+    />
+  </Svg>
+);
+
+export const ContinuousRepeatIcon: React.FC<IconProps> = ({ size = 26, color = '#FFFFFF' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M17 1l4 4-4 4"
+      stroke={color}
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <Path
+      d="M3 11V9a4 4 0 0 1 4-4h14"
+      stroke={color}
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <Path
+      d="M7 23l-4-4 4-4"
+      stroke={color}
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <Path
+      d="M21 13v2a4 4 0 0 1-4 4H3"
+      stroke={color}
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </Svg>
+);
+
+export const ScheduleCalendarClockIcon: React.FC<IconProps> = ({ size = 26, color = '#FFFFFF' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M19 4H5C3.89543 4 3 4.89543 3 6V20C3 21.1046 3.89543 22 5 22H12"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <Path d="M16 2V6M8 2V6M3 10H19" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    <Circle cx="17.5" cy="17.5" r="4.5" stroke={color} strokeWidth="2" />
+    <Polyline points="17.5 15.5 17.5 17.5 19 18.5" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+export const HourglassIcon: React.FC<IconProps> = ({ size = 20, color = '#FFFFFF' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M6 2H18M6 22H18M7 2V6.5C7 8.985 9.239 11 12 11C14.761 11 17 8.985 17 6.5V2M7 22V17.5C7 15.015 9.239 13 12 13C14.761 13 17 15.015 17 17.5V22"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </Svg>
+);
+
+export const StopwatchIcon: React.FC<IconProps> = ({ size = 20, color = '#FFFFFF' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Circle cx="12" cy="13" r="8" stroke={color} strokeWidth="2" />
+    <Path d="M12 9V13L14.5 14.5" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    <Path d="M12 5V2M10 2H14" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+export const RocketIcon: React.FC<IconProps> = ({ size = 20, color = '#0F172A' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M4.5 16.5C3.5 19.5 3 21 3 21C3 21 4.5 20.5 7.5 19.5M4.5 16.5L7.5 19.5M4.5 16.5L9 12M7.5 19.5L12 15"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <Path
+      d="M14.5 3.5C12 4.5 9 7.5 9 12L12 15C16.5 15 19.5 12 20.5 9.5C21 8.2 20.8 7 20 6.2C19.2 5.4 18 5.2 16.7 5.7"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <Circle cx="15" cy="9" r="1.5" fill={color} />
+  </Svg>
+);
+
+export const CloseIcon: React.FC<IconProps> = ({ size = 20, color = '#FFFFFF' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M18 6L6 18M6 6l12 12" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+export const CheckCircleIcon: React.FC<IconProps> = ({ size = 20, color = '#10B981' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Circle cx="12" cy="12" r="10" stroke={color} strokeWidth="2.2" />
+    <Polyline points="8 12 11 15 16 9" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+export const RestartIcon: React.FC<IconProps> = ({ size = 20, color = '#FFFFFF' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.19" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+

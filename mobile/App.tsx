@@ -46,6 +46,8 @@ export default function App() {
   });
   const [refreshing, setRefreshing] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isFullScreenTest, setIsFullScreenTest] = useState(false);
+  const [hideTopBarOnly, setHideTopBarOnly] = useState(false);
 
   const loadData = useCallback(async () => {
     const cfg = await getConfig();
@@ -132,52 +134,54 @@ export default function App() {
       <StatusBar barStyle="dark-content" />
 
         {/* Top Header Bar (Matching EXACT Theme Mockup) */}
-        <View style={styles.topBar}>
-          <View style={styles.brandContainer}>
-            <Image
-              source={require('./src/assets/app-icon.png')}
-              style={styles.logoImage}
-            />
-            <View>
-              <Text style={styles.appTitle}>NetSpeed Monitor</Text>
-              <View style={styles.statusIndicatorRow}>
-                <View
-                  style={[
-                    styles.statusDot,
-                    status.isRunning ? styles.statusDotActive : styles.statusDotIdle,
-                  ]}
-                />
-                <Text style={styles.statusSubtitle}>
-                  {status.isRunning ? 'Monitoring Active' : 'Monitoring Idle'}
-                </Text>
+        {!isFullScreenTest && !hideTopBarOnly && (
+          <View style={styles.topBar}>
+            <View style={styles.brandContainer}>
+              <Image
+                source={require('./src/assets/app-icon.png')}
+                style={styles.logoImage}
+              />
+              <View>
+                <Text style={styles.appTitle}>NetSpeed Monitor</Text>
+                <View style={styles.statusIndicatorRow}>
+                  <View
+                    style={[
+                      styles.statusDot,
+                      status.isRunning ? styles.statusDotActive : styles.statusDotIdle,
+                    ]}
+                  />
+                  <Text style={styles.statusSubtitle}>
+                    {status.isRunning ? 'Monitoring Active' : 'Monitoring Idle'}
+                  </Text>
+                </View>
               </View>
             </View>
-          </View>
 
-          {/* Sync Pill (☁ All Synced / X Pending) */}
-          <TouchableOpacity
-            style={[
-              styles.syncPill,
-              status.pendingCount > 0 ? styles.syncPillPending : styles.syncPillSynced,
-            ]}
-            onPress={handleSyncPending}
-            disabled={isSyncing}
-            activeOpacity={0.8}>
-            {isSyncing ? (
-              <ActivityIndicator size="small" color="#00A389" />
-            ) : status.pendingCount > 0 ? (
-              <>
-                <CloudUploadIcon size={14} color="#D97706" />
-                <Text style={styles.syncPillPendingText}>{status.pendingCount} Pending</Text>
-              </>
-            ) : (
-              <>
-                <CloudCheckIcon size={14} color="#00A389" />
-                <Text style={styles.syncPillSyncedText}>All Synced</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        </View>
+            {/* Sync Pill (☁ All Synced / X Pending) */}
+            <TouchableOpacity
+              style={[
+                styles.syncPill,
+                status.pendingCount > 0 ? styles.syncPillPending : styles.syncPillSynced,
+              ]}
+              onPress={handleSyncPending}
+              disabled={isSyncing}
+              activeOpacity={0.8}>
+              {isSyncing ? (
+                <ActivityIndicator size="small" color="#00A389" />
+              ) : status.pendingCount > 0 ? (
+                <>
+                  <CloudUploadIcon size={14} color="#D97706" />
+                  <Text style={styles.syncPillPendingText}>{status.pendingCount} Pending</Text>
+                </>
+              ) : (
+                <>
+                  <CloudCheckIcon size={14} color="#00A389" />
+                  <Text style={styles.syncPillSyncedText}>All Synced</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Main Screen Content */}
         <View style={styles.tabContentContainer}>
@@ -189,6 +193,11 @@ export default function App() {
               onRefresh={onRefresh}
               onToggleMonitoring={handleToggleMonitoring}
               onTestNow={handleTestNow}
+              onNavigateTab={tab => setCurrentTab(tab)}
+              onFullScreenChange={(isFull, hideTopOnly) => {
+                setIsFullScreenTest(isFull);
+                setHideTopBarOnly(!!hideTopOnly);
+              }}
             />
           )}
 
@@ -217,23 +226,24 @@ export default function App() {
         </View>
 
         {/* Bottom Navigation Bar (Matching Mockup with Speed, Map, History, Settings) */}
-        <View style={styles.bottomNav}>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setCurrentTab('SPEED')}
-            activeOpacity={0.7}>
-            <LightningIcon
-              size={22}
-              color={currentTab === 'SPEED' ? '#00A389' : '#94A3B8'}
-            />
-            <Text
-              style={[
-                styles.navLabel,
-                currentTab === 'SPEED' && styles.navLabelActive,
-              ]}>
-              Speed
-            </Text>
-          </TouchableOpacity>
+        {!isFullScreenTest && (
+          <View style={styles.bottomNav}>
+            <TouchableOpacity
+              style={styles.navItem}
+              onPress={() => setCurrentTab('SPEED')}
+              activeOpacity={0.7}>
+              <LightningIcon
+                size={22}
+                color={currentTab === 'SPEED' ? '#00A389' : '#94A3B8'}
+              />
+              <Text
+                style={[
+                  styles.navLabel,
+                  currentTab === 'SPEED' && styles.navLabelActive,
+                ]}>
+                Speed
+              </Text>
+            </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.navItem}
@@ -292,6 +302,7 @@ export default function App() {
             </Text>
           </TouchableOpacity>
         </View>
+      )}
     </SafeAreaView>
   );
 }

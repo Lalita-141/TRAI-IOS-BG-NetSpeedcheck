@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -6,25 +6,62 @@ import {
   TouchableOpacity,
   View,
   RefreshControl,
-  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { AppConfig } from '../types';
 import { SpeedGauge } from './SpeedGauge';
-import { MetricCard } from './MetricCard';
 import { MonitorStatus } from '../services/monitorService';
+import { SpeedTestProgressView } from './SpeedTestProgressView';
+import { SpeedTestResultView } from './SpeedTestResultView';
 import {
-  DownloadIcon,
-  UploadIcon,
-  ClockIcon,
-  WaveformIcon,
-  ShieldIcon,
-  AntennaIcon,
-  PinIcon,
-  ChevronRightIcon,
+  VideoBrowserTestProgressView,
+  VideoBrowserTestResults,
+} from './VideoBrowserTestProgressView';
+import { VideoBrowserTestResultView } from './VideoBrowserTestResultView';
+import {
+  CoverageTestProgressView,
+  CoverageTestResults,
+} from './CoverageTestProgressView';
+import { CoverageTestResultView } from './CoverageTestResultView';
+import { AdvanceTestModal } from './AdvanceTestModal';
+import {
+  ContinuousTestSetupView,
+  ContinuousTestConfig,
+} from './ContinuousTestSetupView';
+import {
+  ContinuousTestProgressView,
+  ContinuousTestSessionResults,
+} from './ContinuousTestProgressView';
+import { ContinuousTestResultView } from './ContinuousTestResultView';
+import {
+  ScheduledTestSetupView,
+  ScheduledTestConfig,
+} from './ScheduledTestSetupView';
+import {
   PlayIcon,
   StopIcon,
-  GaugeIcon,
+  LightningIcon,
+  VideoBrowserTestIcon,
+  CoverageTestIcon,
+  AdvanceTestsIcon,
+  SignalBarsIcon,
+  ChevronRightIcon,
 } from './Icons';
+
+export type TestType = 'speed' | 'video_browser' | 'coverage' | 'advance';
+export type ScreenMode =
+  | 'home'
+  | 'testing'
+  | 'result'
+  | 'video_testing'
+  | 'video_result'
+  | 'coverage_testing'
+  | 'coverage_result'
+  | 'continuous_setup'
+  | 'continuous_testing'
+  | 'continuous_result'
+  | 'schedule_setup';
+
 
 interface SpeedDashboardViewProps {
   config: AppConfig | null;
@@ -33,58 +70,281 @@ interface SpeedDashboardViewProps {
   onRefresh: () => void;
   onToggleMonitoring: () => void;
   onTestNow: () => void;
+  onNavigateTab?: (tab: 'SPEED' | 'MAP' | 'HISTORY' | 'SETTINGS') => void;
+  onFullScreenChange?: (isFullScreen: boolean, hideTopOnly?: boolean) => void;
 }
 
 export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
-  config,
+  config: _config,
   status,
   refreshing,
   onRefresh,
   onToggleMonitoring,
   onTestNow,
+  onNavigateTab,
+  onFullScreenChange,
 }) => {
-  const last = status.lastSample;
-  const progress = status.currentProgress;
+  const [activeTestType, setActiveTestType] = useState<TestType>('speed');
+  const [screenMode, setScreenMode] = useState<ScreenMode>('home');
 
-  let gaugeValue = last?.down_mbps ?? 0;
-  let gaugeLabel = 'DOWNLOAD';
-  let gaugeUnit = 'Mbps';
-  let gaugeMax = 100;
+  // Video & Browser Test State
+  const [videoResults, setVideoResults] = useState<VideoBrowserTestResults | null>(null);
+  // Coverage Test State
+  const [coverageResults, setCoverageResults] = useState<CoverageTestResults | null>(null);
+  // Advance Tests Modal State
+  const [showAdvanceModal, setShowAdvanceModal] = useState<boolean>(false);
 
-  if (status.isTesting && progress) {
-    if (progress.phase === 'ping') {
-      gaugeLabel = 'PING';
-      gaugeValue = progress.latency ?? 0;
-      gaugeUnit = 'ms';
-      gaugeMax = 200;
-    } else if (progress.phase === 'upload') {
-      gaugeLabel = 'UPLOAD';
-      gaugeValue = progress.upSpeed ?? 0;
-      gaugeUnit = 'Mbps';
-      gaugeMax = 50;
-    } else if (progress.phase === 'download') {
-      gaugeLabel = 'DOWNLOAD';
-      gaugeValue = progress.downSpeed ?? 0;
-      gaugeUnit = 'Mbps';
-      gaugeMax = 100;
+  // Schedule and Continuous Test active states
+  const [activeSchedule, setActiveSchedule] = useState<ScheduledTestConfig | null>(null);
+  const [isContinuousRunning, setIsContinuousRunning] = useState<boolean>(false);
+  const [continuousConfig, setContinuousConfig] = useState<ContinuousTestConfig | null>(null);
+  const [continuousResults, setContinuousResults] = useState<ContinuousTestSessionResults | null>(null);
+
+
+
+
+
+
+  // Auto transition between home -> testing -> result (ONLY for manual speed test on home)
+  const prevTestingRef = useRef(status.isTesting);
+  useEffect(() => {
+    // Only transition into 'testing' if user is on 'home' and a manual speed test started
+    if (!prevTestingRef.current && status.isTesting) {
+      if (screenMode === 'home' && activeTestType === 'speed') {
+        setScreenMode('testing');
+      }
+    } else if (prevTestingRef.current && !status.isTesting) {
+      // Only transition out of 'testing' if user was actually on 'testing'
+      if (screenMode === 'testing') {
+        if (status.lastSample) {
+          setScreenMode('result');
+        } else {
+          setScreenMode('home');
+        }
+      }
     }
-  }
+    prevTestingRef.current = status.isTesting;
+  }, [status.isTesting, status.lastSample, screenMode, activeTestType]);
 
-  const formatLastTime = (ts: number | null) => {
-    if (!ts) return 'Never';
-    const date = new Date(ts * 1000);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  };
+  // Notify parent if full screen mode is active
+  useEffect(() => {
+    if (screenMode === 'continuous_setup' || screenMode === 'schedule_setup') {
+      onFullScreenChange?.(false, true);
+    } else if (screenMode !== 'home') {
+      onFullScreenChange?.(true, false);
+    } else {
+      onFullScreenChange?.(false, false);
+    }
+  }, [screenMode, onFullScreenChange]);
+
+  const last = status.lastSample;
+  const lastSpeed = last?.down_mbps ?? 0;
 
   const carrierName =
     last?.carrier && last.carrier !== '--' && last.carrier !== 'wifi'
       ? last.carrier
       : last?.network === 'wifi'
-      ? 'Wi-Fi'
-      : last?.radio || 'Cellular';
+        ? 'Wi-Fi'
+        : last?.radio || 'Cellular';
 
-  const networkBadge = last?.network === 'wifi' ? 'Wi-Fi' : last?.radio || 'Mobile';
+  const radioTech = last?.radio || (last?.network === 'wifi' ? 'Wi-Fi' : '4G');
+  const carrierPillText = `${carrierName}_${radioTech}`;
 
+  // Estimate signal dBm based on connection type
+  const calculatedDbm =
+    last?.network === 'wifi'
+      ? -58
+      : last?.accuracy && last.accuracy < 15
+        ? -88
+        : -101;
+
+  const handleStartCurrentTest = () => {
+    if (activeTestType === 'speed') {
+      setScreenMode('testing');
+      onTestNow();
+    } else if (activeTestType === 'video_browser') {
+      setScreenMode('video_testing');
+    } else if (activeTestType === 'coverage') {
+      setScreenMode('coverage_testing');
+    } else if (activeTestType === 'advance') {
+      setShowAdvanceModal(true);
+    }
+  };
+
+  // 1. RENDER SPEED TESTING SCREEN (Screenshot 1)
+  if (screenMode === 'testing') {
+    return (
+      <SpeedTestProgressView
+        status={status}
+        onCancel={() => setScreenMode('home')}
+      />
+    );
+  }
+
+  // 2. RENDER SPEED RESULT SCREEN (Screenshot 2)
+  if (screenMode === 'result') {
+    return (
+      <SpeedTestResultView
+        sample={status.lastSample}
+        testId={status.lastSample?.id ? status.lastSample.id.slice(-2) : '9'}
+        onBack={() => setScreenMode('home')}
+        onRunVideoBrowserTest={() => {
+          setActiveTestType('video_browser');
+          setScreenMode('video_testing');
+        }}
+      />
+    );
+  }
+
+  // 3. RENDER VIDEO & BROWSER TESTING SCREEN (Screenshot 3)
+  if (screenMode === 'video_testing') {
+    return (
+      <VideoBrowserTestProgressView
+        onCancel={() => setScreenMode('home')}
+        onComplete={res => {
+          setVideoResults(res);
+          setScreenMode('video_result');
+        }}
+      />
+    );
+  }
+
+  // 4. RENDER VIDEO & BROWSER RESULT SCREEN
+  if (screenMode === 'video_result') {
+    return (
+      <VideoBrowserTestResultView
+        results={videoResults}
+        sample={status.lastSample}
+        testId={status.lastSample?.id ? status.lastSample.id.slice(-2) : '10'}
+        onBack={() => setScreenMode('home')}
+        onRunSpeedTest={() => {
+          setActiveTestType('speed');
+          setScreenMode('testing');
+          onTestNow();
+        }}
+      />
+    );
+  }
+
+  // 5. RENDER COVERAGE TESTING SCREEN
+  if (screenMode === 'coverage_testing') {
+    return (
+      <CoverageTestProgressView
+        status={status}
+        onCancel={() => setScreenMode('home')}
+        onComplete={res => {
+          setCoverageResults(res);
+          setScreenMode('coverage_result');
+        }}
+      />
+    );
+  }
+
+  // 6. RENDER COVERAGE RESULT SCREEN
+  if (screenMode === 'coverage_result') {
+    return (
+      <CoverageTestResultView
+        sample={status.lastSample}
+        results={coverageResults}
+        onBack={() => setScreenMode('home')}
+        onRunSpeedTest={() => {
+          setActiveTestType('speed');
+          setScreenMode('testing');
+          onTestNow();
+        }}
+        onOpenMap={() => {
+          setScreenMode('home');
+          onNavigateTab?.('MAP');
+        }}
+      />
+    );
+  }
+
+  // 7. RENDER CONTINUOUS SETUP SCREEN
+  if (screenMode === 'continuous_setup') {
+    return (
+      <ContinuousTestSetupView
+        isRunning={isContinuousRunning}
+        activeConfig={continuousConfig}
+        onBack={() => setScreenMode('home')}
+        onStartTest={cfg => {
+          setIsContinuousRunning(true);
+          setContinuousConfig(cfg);
+          setScreenMode('continuous_testing');
+        }}
+        onStopTest={() => {
+          setIsContinuousRunning(false);
+          setContinuousConfig(null);
+          Alert.alert('Continuous Test Stopped', 'Continuous testing has been halted.');
+        }}
+      />
+    );
+  }
+
+  // 8. RENDER CONTINUOUS TESTING EXECUTION SCREEN
+  if (screenMode === 'continuous_testing' && continuousConfig) {
+    return (
+      <ContinuousTestProgressView
+        config={continuousConfig}
+        status={status}
+        onStop={res => {
+          setIsContinuousRunning(false);
+          setContinuousResults(res);
+          setScreenMode('continuous_result');
+        }}
+        onComplete={res => {
+          setIsContinuousRunning(false);
+          setContinuousResults(res);
+          setScreenMode('continuous_result');
+        }}
+      />
+    );
+  }
+
+  // 9. RENDER CONTINUOUS RESULT SCREEN
+  if (screenMode === 'continuous_result' && continuousResults) {
+    return (
+      <ContinuousTestResultView
+        results={continuousResults}
+        onBackToHome={() => setScreenMode('home')}
+        onRestartTest={() => {
+          if (continuousConfig) {
+            setIsContinuousRunning(true);
+            setScreenMode('continuous_testing');
+          } else {
+            setScreenMode('continuous_setup');
+          }
+        }}
+      />
+    );
+  }
+
+
+  // 8. RENDER SCHEDULED SETUP SCREEN (Screenshot 3)
+  if (screenMode === 'schedule_setup') {
+    return (
+      <ScheduledTestSetupView
+        activeSchedule={activeSchedule}
+        onBack={() => setScreenMode('home')}
+        onScheduleTest={cfg => {
+          setActiveSchedule(cfg);
+          Alert.alert(
+            'Test Scheduled',
+            `Your ${cfg.frequency.toUpperCase()} automated test has been scheduled from ${cfg.fromDate} to ${cfg.toDate}.`
+          );
+        }}
+        onDisableSchedule={() => {
+          setActiveSchedule(null);
+          Alert.alert(
+            'Schedule Disabled',
+            'Automated scheduled testing has been disabled.'
+          );
+        }}
+      />
+    );
+  }
+
+  // 3. RENDER MAIN HOME TAB (Clean, with START button and 4 test buttons)
   return (
     <ScrollView
       style={styles.scrollView}
@@ -98,186 +358,393 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
           colors={['#00A389']}
         />
       }>
-      {/* Top Gauge Card (Option A Theme) */}
+      {/* Main Center Gauge Card with START Button */}
       <View style={styles.gaugeCard}>
-        <SpeedGauge
-          value={gaugeValue}
-          maxValue={gaugeMax}
-          label={gaugeLabel}
-          unit={gaugeUnit}
-          phase={progress?.phase || 'idle'}
-          isTesting={status.isTesting}
-        />
+        {/* Top Header Pills (Network & Coverage dBm matching reference mockup) */}
+        <View style={styles.topPillsRow}>
+          <View style={styles.networkPill}>
+            <Text style={styles.networkPillText}>{carrierPillText}</Text>
+            <View style={styles.statusDotGreen} />
+          </View>
 
-        {/* Test Progress Bar */}
-        {status.isTesting && progress ? (
-          <View style={styles.progressContainer}>
-            <View style={styles.progressBarTrack}>
+          <View style={styles.coveragePill}>
+            <SignalBarsIcon size={14} color="#10B981" />
+            <Text style={styles.coveragePillText}>Coverage: {calculatedDbm} dBm</Text>
+          </View>
+        </View>
+
+        {/* Central START Button / Speed Gauge */}
+        <View style={styles.startGaugeContainer}>
+          <SpeedGauge
+            value={lastSpeed}
+            maxValue={100}
+            label="DOWNLOAD"
+            unit="Mbps"
+            phase="idle"
+            isTesting={false}
+            onStart={handleStartCurrentTest}
+            startLabel="START"
+          />
+        </View>
+
+        {/* 2x2 Grid of 4 Test Buttons (Speed Test, Video & Browser Test, Coverage Test, Advance Tests) */}
+        <View style={styles.testButtonsGrid}>
+          {/* Row 1: Speed Test & Video & Browser Test */}
+          <View style={styles.testButtonsRow}>
+            <TouchableOpacity
+              style={[
+                styles.testButton,
+                activeTestType === 'speed' ? styles.testButtonActive : styles.testButtonInactive,
+              ]}
+              onPress={() => setActiveTestType('speed')}
+              activeOpacity={0.85}>
+              <LightningIcon
+                size={16}
+                color={activeTestType === 'speed' ? '#0F172A' : '#64748B'}
+              />
+              <Text
+                style={[
+                  styles.testButtonText,
+                  activeTestType === 'speed'
+                    ? styles.testButtonTextActive
+                    : styles.testButtonTextInactive,
+                ]}>
+                Speed Test
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.testButton,
+                activeTestType === 'video_browser'
+                  ? styles.testButtonActive
+                  : styles.testButtonInactive,
+              ]}
+              onPress={() => setActiveTestType('video_browser')}
+              activeOpacity={0.85}>
+              <VideoBrowserTestIcon
+                size={16}
+                color={activeTestType === 'video_browser' ? '#0F172A' : '#64748B'}
+              />
+              <Text
+                style={[
+                  styles.testButtonText,
+                  activeTestType === 'video_browser'
+                    ? styles.testButtonTextActive
+                    : styles.testButtonTextInactive,
+                ]}>
+                Video & Browser Test
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Row 2: Coverage Test & Advance Tests */}
+          <View style={styles.testButtonsRow}>
+            <TouchableOpacity
+              style={[
+                styles.testButton,
+                activeTestType === 'coverage' ? styles.testButtonActive : styles.testButtonInactive,
+              ]}
+              onPress={() => setActiveTestType('coverage')}
+              activeOpacity={0.85}>
+              <CoverageTestIcon
+                size={16}
+                color={activeTestType === 'coverage' ? '#0F172A' : '#64748B'}
+              />
+              <Text
+                style={[
+                  styles.testButtonText,
+                  activeTestType === 'coverage'
+                    ? styles.testButtonTextActive
+                    : styles.testButtonTextInactive,
+                ]}>
+                Coverage Test
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.testButton,
+                activeTestType === 'advance' ? styles.testButtonActive : styles.testButtonInactive,
+              ]}
+              onPress={() => {
+                setActiveTestType('advance');
+                setShowAdvanceModal(true);
+              }}
+              activeOpacity={0.85}>
+              <AdvanceTestsIcon
+                size={16}
+                color={activeTestType === 'advance' ? '#0F172A' : '#64748B'}
+              />
+              <Text
+                style={[
+                  styles.testButtonText,
+                  activeTestType === 'advance'
+                    ? styles.testButtonTextActive
+                    : styles.testButtonTextInactive,
+                ]}>
+                Advance Tests
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
+      {/* Content below the 4 buttons (Clean and minimal as requested) */}
+
+      {/* 1. SPEED TEST MODE */}
+      {activeTestType === 'speed' && (
+        <View style={styles.modeContainer}>
+          {/* Quick View Last Result Card if a previous test exists */}
+          {last && (
+            <TouchableOpacity
+              style={styles.viewResultCard}
+              onPress={() => setScreenMode('result')}
+              activeOpacity={0.85}>
+              <View style={styles.viewResultLeft}>
+                <View style={styles.viewResultIconCircle}>
+                  <LightningIcon size={16} color="#00A389" />
+                </View>
+                <View>
+                  <Text style={styles.viewResultTitle}>Latest Test Result</Text>
+                  <Text style={styles.viewResultSubtitle}>
+                    {last.down_mbps != null ? `${last.down_mbps.toFixed(1)} Mbps Down` : '--'} •{' '}
+                    {last.latency_ms != null ? `${Math.round(last.latency_ms)} ms` : '--'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.viewResultArrow}>
+                <Text style={styles.viewResultDetailsText}>View Details</Text>
+                <ChevronRightIcon size={16} color="#00A389" />
+              </View>
+            </TouchableOpacity>
+          )}
+
+          {/* Background Monitoring Control Card */}
+          <View style={styles.monitoringControlCard}>
+            <View style={styles.monitoringLeft}>
               <View
                 style={[
-                  styles.progressBarFill,
-                  { width: `${progress.progressPercent || 15}%` },
+                  styles.statusIndicatorDot,
+                  status.isRunning ? styles.statusDotLive : styles.statusDotOff,
                 ]}
               />
+              <View>
+                <Text style={styles.monitoringTitle}>Background QoS Monitoring</Text>
+                <Text style={styles.monitoringSubtitle}>
+                  {status.isRunning ? 'Active (Recording samples)' : 'Idle (Tap to start)'}
+                </Text>
+              </View>
             </View>
-            <Text style={styles.progressMessage}>{progress.message}</Text>
-          </View>
-        ) : null}
 
-        {/* Action Buttons Row */}
-        <View style={styles.actionButtonsRow}>
+            <TouchableOpacity
+              style={[
+                styles.monitoringToggleBtn,
+                status.isRunning ? styles.monitoringStopBtn : styles.monitoringStartBtn,
+              ]}
+              onPress={onToggleMonitoring}
+              activeOpacity={0.8}>
+              {status.isRunning ? (
+                <>
+                  <StopIcon size={13} color="#FFFFFF" />
+                  <Text style={styles.monitoringBtnText}>Stop</Text>
+                </>
+              ) : (
+                <>
+                  <PlayIcon size={13} color="#FFFFFF" />
+                  <Text style={styles.monitoringBtnText}>Start</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* 2. VIDEO & BROWSER TEST MODE */}
+      {activeTestType === 'video_browser' && (
+        <View style={styles.modeContainer}>
+          {/* Quick View Last Result Card if a previous video test exists */}
+          {videoResults && (
+            <TouchableOpacity
+              style={styles.viewResultCard}
+              onPress={() => setScreenMode('video_result')}
+              activeOpacity={0.85}>
+              <View style={styles.viewResultLeft}>
+                <View style={styles.viewResultIconCircle}>
+                  <VideoBrowserTestIcon size={16} color="#00A389" />
+                </View>
+                <View>
+                  <Text style={styles.viewResultTitle}>Latest Video & Browser Result</Text>
+                  <Text style={styles.viewResultSubtitle}>
+                    {videoResults.videoDelayMs} ms Video Delay • {videoResults.webDelayMs} ms Web Delay
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.viewResultArrow}>
+                <Text style={styles.viewResultDetailsText}>View Details</Text>
+                <ChevronRightIcon size={16} color="#00A389" />
+              </View>
+            </TouchableOpacity>
+          )}
+
+          {/* Start Video & Browser Test Action */}
           <TouchableOpacity
-            style={[
-              styles.startMonitoringBtn,
-              status.isRunning ? styles.stopMonitoringBtn : null,
-            ]}
-            onPress={onToggleMonitoring}
+            style={styles.fullWidthActionBtn}
+            onPress={() => setScreenMode('video_testing')}
             activeOpacity={0.85}>
-            {status.isRunning ? (
-              <StopIcon size={15} color="#FFFFFF" />
-            ) : (
-              <PlayIcon size={14} color="#FFFFFF" />
-            )}
-            <Text style={styles.startBtnText}>
-              {status.isRunning ? 'Stop Monitoring' : 'Start Monitoring'}
-            </Text>
+            <VideoBrowserTestIcon size={18} color="#FFFFFF" />
+            <Text style={styles.fullWidthActionBtnText}>Start Video & Browser Test</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* 3. COVERAGE TEST MODE */}
+      {activeTestType === 'coverage' && (
+        <View style={styles.modeContainer}>
+          {/* Quick View Last Result Card if a previous coverage test exists */}
+          {coverageResults && (
+            <TouchableOpacity
+              style={styles.viewResultCard}
+              onPress={() => setScreenMode('coverage_result')}
+              activeOpacity={0.85}>
+              <View style={styles.viewResultLeft}>
+                <View style={styles.viewResultIconCircle}>
+                  <CoverageTestIcon size={16} color="#00A389" />
+                </View>
+                <View>
+                  <Text style={styles.viewResultTitle}>Latest Coverage Result</Text>
+                  <Text style={styles.viewResultSubtitle}>
+                    {coverageResults.signalDbm} dBm • {coverageResults.signalQuality} Signal
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.viewResultArrow}>
+                <Text style={styles.viewResultDetailsText}>View Details</Text>
+                <ChevronRightIcon size={16} color="#00A389" />
+              </View>
+            </TouchableOpacity>
+          )}
+
+          {/* Start Coverage Test Action */}
+          <TouchableOpacity
+            style={styles.fullWidthActionBtn}
+            onPress={() => setScreenMode('coverage_testing')}
+            activeOpacity={0.85}>
+            <CoverageTestIcon size={18} color="#FFFFFF" />
+            <Text style={styles.fullWidthActionBtnText}>Start Coverage Diagnostic Test</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* 4. ADVANCE TESTS MODE */}
+      {activeTestType === 'advance' && (
+        <View style={styles.modeContainer}>
+          <View style={styles.sectionHeadingRow}>
+            <Text style={styles.sectionHeading}>Advance Diagnostic Modes</Text>
+          </View>
+
+          <TouchableOpacity
+            style={styles.fullWidthActionBtn}
+            onPress={() => setShowAdvanceModal(true)}
+            activeOpacity={0.85}>
+            <AdvanceTestsIcon size={18} color="#FFFFFF" />
+            <Text style={styles.fullWidthActionBtnText}>Run an Advance Test</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.testNowBtn, status.isTesting && styles.btnDisabled]}
-            onPress={onTestNow}
-            disabled={status.isTesting}
-            activeOpacity={0.85}>
-            {status.isTesting ? (
-              <ActivityIndicator size="small" color="#00A389" />
-            ) : (
-              <>
-                <GaugeIcon size={16} color="#1E293B" />
-                <Text style={styles.testNowBtnText}>Test Now</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        </View>
-      </View>
+          <View style={[styles.detailsCard, styles.advanceCardSpacing]}>
+            <TouchableOpacity
+              style={styles.detailRow}
+              onPress={() => setScreenMode('continuous_setup')}
+              activeOpacity={0.7}>
+              <View>
+                <Text style={styles.advTitle}>Continuous Test</Text>
+                <Text style={styles.advSubtitle}>Capture network coverage continuously</Text>
+              </View>
+              <ChevronRightIcon size={18} color="#64748B" />
+            </TouchableOpacity>
 
-      {/* QoS Section Heading */}
-      <View style={styles.sectionHeadingRow}>
-        <Text style={styles.sectionHeading}>Speed & Quality of Service (QoS)</Text>
-      </View>
+            <View style={styles.detailDivider} />
 
-      {/* QoS 2-Column Metrics Grid */}
-      <View style={styles.metricsGrid}>
-        <MetricCard
-          title="Download"
-          value={last?.down_mbps != null ? last.down_mbps.toFixed(1) : '--'}
-          unit="Mbps"
-          accentColor="#0284C7"
-          iconBgColor="#E0F2FE"
-          subtitle="Throughput"
-          icon={<DownloadIcon size={16} color="#0284C7" />}
-        />
-
-        <MetricCard
-          title="Upload"
-          value={last?.up_mbps != null ? last.up_mbps.toFixed(1) : '--'}
-          unit="Mbps"
-          accentColor="#7C3AED"
-          iconBgColor="#EDE9FE"
-          subtitle="Throughput"
-          icon={<UploadIcon size={16} color="#7C3AED" />}
-        />
-
-        <MetricCard
-          title="Latency"
-          value={last?.latency_ms != null ? Math.round(last.latency_ms) : '--'}
-          unit="ms"
-          accentColor="#D97706"
-          iconBgColor="#FEF3C7"
-          subtitle="Ping"
-          icon={<ClockIcon size={16} color="#D97706" />}
-        />
-
-        <MetricCard
-          title="Jitter"
-          value={last?.jitter_ms != null ? last.jitter_ms.toFixed(1) : '--'}
-          unit="ms"
-          accentColor="#DB2777"
-          iconBgColor="#FCE7F3"
-          subtitle="Variance"
-          icon={<WaveformIcon size={16} color="#DB2777" />}
-        />
-
-        <MetricCard
-          title="Packet Loss"
-          value={last?.packet_loss_pct != null ? `${last.packet_loss_pct}` : '0'}
-          unit="%"
-          accentColor={last?.packet_loss_pct && last.packet_loss_pct > 0 ? '#EF4444' : '#059669'}
-          iconBgColor={last?.packet_loss_pct && last.packet_loss_pct > 0 ? '#FEE2E2' : '#D1FAE5'}
-          subtitle="Stability"
-          icon={
-            <ShieldIcon
-              size={16}
-              color={last?.packet_loss_pct && last.packet_loss_pct > 0 ? '#EF4444' : '#059669'}
-            />
-          }
-        />
-
-        <MetricCard
-          title="Network & ISP"
-          value={carrierName}
-          badge={networkBadge}
-          accentColor="#00A389"
-          iconBgColor="#CCFBF1"
-          subtitle={
-            last?.network === 'wifi'
-              ? `${carrierName} • Wi-Fi`
-              : `${carrierName} • ${last?.radio || 'Cellular'}`
-          }
-          icon={<AntennaIcon size={16} color="#00A389" />}
-        />
-      </View>
-
-      {/* GPS Coordinates Card */}
-      <View style={styles.gpsCard}>
-        <View style={styles.gpsLeft}>
-          <View style={styles.gpsIconCircle}>
-            <PinIcon size={16} color="#0284C7" />
+            <TouchableOpacity
+              style={styles.detailRow}
+              onPress={() => setScreenMode('schedule_setup')}
+              activeOpacity={0.7}>
+              <View>
+                <Text style={styles.advTitle}>Schedule Test</Text>
+                <Text style={styles.advSubtitle}>Set it once. The app runs tests automatically</Text>
+              </View>
+              <ChevronRightIcon size={18} color="#64748B" />
+            </TouchableOpacity>
           </View>
-          <View>
-            <Text style={styles.gpsLabel}>GPS Coordinates</Text>
-            <Text style={styles.gpsValue}>
-              {last?.lat != null && last?.lng != null
-                ? `${last.lat.toFixed(4)}, ${last.lng.toFixed(4)}`
-                : 'Acquiring GPS...'}
-            </Text>
-          </View>
-        </View>
-        <ChevronRightIcon size={18} color="#94A3B8" />
-      </View>
 
-      {/* Environment & Device Details Card */}
-      <View style={styles.detailsCard}>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Environment</Text>
-          <Text style={styles.detailValue}>
-            {last?.location_type || 'Outdoor'} {last?.accuracy ? `(±${Math.round(last.accuracy)}m)` : ''}
-          </Text>
+          {/* Active Schedule Status & Disable Button */}
+          {activeSchedule && (
+            <View style={styles.activeScheduleDashboardCard}>
+              <View style={styles.activeScheduleDashboardLeft}>
+                <View style={styles.statusDotLive} />
+                <View>
+                  <Text style={styles.activeScheduleDashboardTitle}>
+                    Scheduled Testing Active ({activeSchedule.frequency.toUpperCase()})
+                  </Text>
+                  <Text style={styles.activeScheduleDashboardSub}>
+                    {activeSchedule.fromDate} to {activeSchedule.toDate}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={styles.disableSmallBtn}
+                onPress={() => {
+                  setActiveSchedule(null);
+                  Alert.alert('Schedule Disabled', 'Automated scheduled testing has been disabled.');
+                }}
+                activeOpacity={0.8}>
+                <Text style={styles.disableSmallBtnText}>Disable</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Active Continuous Test Status & Stop Button */}
+          {isContinuousRunning && continuousConfig && (
+            <View style={styles.activeScheduleDashboardCard}>
+              <View style={styles.activeScheduleDashboardLeft}>
+                <View style={styles.statusDotLive} />
+                <View>
+                  <Text style={styles.activeScheduleDashboardTitle}>
+                    Continuous Testing Active ({continuousConfig.testType.toUpperCase()})
+                  </Text>
+                  <Text style={styles.activeScheduleDashboardSub}>
+                    Interval: {continuousConfig.gapSeconds}s • Duration: {continuousConfig.durationMins}m
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={styles.disableSmallBtn}
+                onPress={() => {
+                  setIsContinuousRunning(false);
+                  setContinuousConfig(null);
+                  Alert.alert('Continuous Test Stopped', 'Continuous testing has been halted.');
+                }}
+                activeOpacity={0.8}>
+                <Text style={styles.disableSmallBtnText}>Stop</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
-        <View style={styles.detailDivider} />
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Device & OS</Text>
-          <Text style={styles.detailValue}>
-            {last?.device_model || 'Mobile'} ({last?.os_platform || 'iOS/Android'})
-          </Text>
-        </View>
-        <View style={styles.detailDivider} />
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Last Test / Cadence</Text>
-          <Text style={styles.detailValue}>
-            {formatLastTime(last?.ts ?? null)} ({config ? `${config.testIntervalSeconds}s` : '5m'})
-          </Text>
-        </View>
-      </View>
+      )}
+
+      {/* Advance Tests Bottom Sheet Modal (Screenshot 1) */}
+      <AdvanceTestModal
+        visible={showAdvanceModal}
+        onClose={() => setShowAdvanceModal(false)}
+        onSelectContinuous={() => {
+          setShowAdvanceModal(false);
+          setScreenMode('continuous_setup');
+        }}
+        onSelectSchedule={() => {
+          setShowAdvanceModal(false);
+          setScreenMode('schedule_setup');
+        }}
+      />
     </ScrollView>
   );
 };
@@ -290,11 +757,11 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 16,
     paddingTop: 12,
-    paddingBottom: 24,
+    paddingBottom: 28,
   },
   gaugeCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    borderRadius: 22,
     paddingVertical: 18,
     paddingHorizontal: 16,
     borderWidth: 1,
@@ -304,25 +771,64 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 10,
     elevation: 3,
-    marginBottom: 16,
+    marginBottom: 14,
     alignItems: 'center',
+  },
+  topPillsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginBottom: 9,
+  },
+  networkPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EEF2F6',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 6,
+  },
+  networkPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1E293B',
+  },
+  statusDotGreen: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10B981',
+  },
+  coveragePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ECFDF5',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    gap: 5,
+  },
+  coveragePillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#059669',
+  },
+  startGaugeContainer: {
+    marginVertical: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
   },
   progressContainer: {
     width: '90%',
     alignItems: 'center',
     marginVertical: 10,
-  },
-  progressBarTrack: {
-    width: '100%',
-    height: 6,
-    backgroundColor: '#E2E8F0',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: '100%',
-    backgroundColor: '#00A389',
-    borderRadius: 3,
   },
   progressMessage: {
     fontSize: 12,
@@ -330,55 +836,165 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 6,
   },
-  actionButtonsRow: {
-    flexDirection: 'row',
+  testButtonsGrid: {
     width: '100%',
-    marginTop: 14,
-    gap: 12,
+    marginTop: 18,
+    gap: 10,
   },
-  startMonitoringBtn: {
-    flex: 1.3,
-    backgroundColor: '#00A389',
+  testButtonsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    width: '100%',
+  },
+  testButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 13,
-    borderRadius: 14,
-    gap: 8,
-    shadowColor: '#00A389',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 24,
+    gap: 6,
+  },
+  testButtonActive: {
+    backgroundColor: '#F5A623',
+    borderWidth: 1.5,
+    borderColor: '#F5A623',
+    shadowColor: '#F5A623',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
     elevation: 3,
   },
-  stopMonitoringBtn: {
-    backgroundColor: '#EF4444',
-    shadowColor: '#EF4444',
+  testButtonInactive: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
   },
-  startBtnText: {
-    color: '#FFFFFF',
+  testButtonText: {
+    fontSize: 11.5,
     fontWeight: '700',
-    fontSize: 14,
   },
-  testNowBtn: {
-    flex: 1,
-    backgroundColor: '#F8FAFC',
+  testButtonTextActive: {
+    color: '#0F172A',
+  },
+  testButtonTextInactive: {
+    color: '#334155',
+  },
+  modeContainer: {
+    marginTop: 2,
+    marginBottom: 12,
+  },
+  viewResultCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 14,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: '#E8EDF2',
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  viewResultLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  viewResultIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#ECFDF5',
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 13,
+  },
+  viewResultTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  viewResultSubtitle: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+    marginTop: 2,
+  },
+  viewResultArrow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  viewResultDetailsText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#00A389',
+  },
+  monitoringControlCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E8EDF2',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  monitoringLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  statusIndicatorDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  statusDotLive: {
+    backgroundColor: '#10B981',
+  },
+  statusDotOff: {
+    backgroundColor: '#94A3B8',
+  },
+  monitoringTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  monitoringSubtitle: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  monitoringToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
     borderRadius: 14,
     gap: 6,
   },
-  testNowBtnText: {
-    color: '#1E293B',
-    fontWeight: '700',
-    fontSize: 14,
+  monitoringStartBtn: {
+    backgroundColor: '#00A389',
   },
-  btnDisabled: {
-    opacity: 0.6,
+  monitoringStopBtn: {
+    backgroundColor: '#EF4444',
+  },
+  monitoringBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 12,
   },
   sectionHeadingRow: {
     marginBottom: 10,
@@ -397,48 +1013,6 @@ const styles = StyleSheet.create({
     marginHorizontal: -5,
     marginBottom: 10,
   },
-  gpsCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    borderWidth: 1,
-    borderColor: '#E8EDF2',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  gpsLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  gpsIconCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#E0F2FE',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  gpsLabel: {
-    fontSize: 12,
-    color: '#64748B',
-    fontWeight: '600',
-  },
-  gpsValue: {
-    fontSize: 14,
-    color: '#0F172A',
-    fontWeight: '700',
-    marginTop: 2,
-    fontVariant: ['tabular-nums'],
-  },
   detailsCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
@@ -456,7 +1030,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 4,
+    paddingVertical: 5,
   },
   detailLabel: {
     fontSize: 12,
@@ -472,5 +1046,130 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#F1F5F9',
     marginVertical: 6,
+  },
+  fullWidthActionBtn: {
+    backgroundColor: '#00A389',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 14,
+    gap: 8,
+    marginTop: 6,
+    shadowColor: '#00A389',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  fullWidthActionBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  advTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1E293B',
+  },
+  advSubtitle: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  advValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#00A389',
+  },
+  miniToggleBtn: {
+    backgroundColor: '#00A389',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  miniToggleActive: {
+    backgroundColor: '#EF4444',
+  },
+  miniToggleText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 11,
+  },
+  miniOutlineBtn: {
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 10,
+  },
+  miniOutlineBtnText: {
+    color: '#0F172A',
+    fontWeight: '600',
+    fontSize: 11,
+  },
+  spinnerSpacing: {
+    marginBottom: 4,
+  },
+  signalGoodValue: {
+    color: '#10B981',
+    fontWeight: '800',
+  },
+  alignRightCol: {
+    alignItems: 'flex-end',
+  },
+  detailCoordsSubtext: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#64748B',
+    marginTop: 2,
+    fontVariant: ['tabular-nums'],
+  },
+  advanceCardSpacing: {
+    marginTop: 12,
+  },
+  activeScheduleDashboardCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1.5,
+    borderColor: '#10B981',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    shadowColor: '#10B981',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  activeScheduleDashboardLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  activeScheduleDashboardTitle: {
+    fontSize: 12.5,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  activeScheduleDashboardSub: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  disableSmallBtn: {
+    backgroundColor: '#EF4444',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  disableSmallBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 });
