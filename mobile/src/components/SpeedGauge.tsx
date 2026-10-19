@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import Svg, { Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
 
 interface SpeedGaugeProps {
@@ -9,6 +9,8 @@ interface SpeedGaugeProps {
   unit?: string;
   phase?: string;
   isTesting?: boolean;
+  onStart?: () => void;
+  startLabel?: string;
 }
 
 export const SpeedGauge: React.FC<SpeedGaugeProps> = ({
@@ -18,8 +20,10 @@ export const SpeedGauge: React.FC<SpeedGaugeProps> = ({
   unit = 'Mbps',
   phase = 'idle',
   isTesting = false,
+  onStart,
+  startLabel = 'START',
 }) => {
-  const size = 210;
+  const size = 220;
   const strokeWidth = 14;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
@@ -88,20 +92,36 @@ export const SpeedGauge: React.FC<SpeedGaugeProps> = ({
         />
       </Svg>
 
-      {/* Center Reading */}
-      <View style={styles.centerContent}>
-        <Text style={styles.label}>{label.toUpperCase()}</Text>
-        <Text style={styles.valueText}>
-          {value > 0 ? value.toFixed(value >= 10 ? 1 : 2) : '--'}
-        </Text>
-        <Text style={styles.unitText}>{unit}</Text>
-        {isTesting && (
-          <View style={[styles.pulseBadge, { backgroundColor: primaryColor + '15' }]}>
+      {/* Center Reading or START Button */}
+      {isTesting ? (
+        <View style={styles.centerContent} pointerEvents="none">
+          <Text style={styles.label}>{label.toUpperCase()}</Text>
+          <Text style={styles.valueText}>
+            {value > 0 ? value.toFixed(value >= 10 ? 1 : 2) : '0.0'}
+          </Text>
+          <Text style={styles.unitText}>{unit}</Text>
+          <View style={[styles.pulseBadge, { backgroundColor: primaryColor + '18' }]}>
             <View style={[styles.pulseDot, { backgroundColor: primaryColor }]} />
             <Text style={[styles.pulseText, { color: primaryColor }]}>TESTING</Text>
           </View>
-        )}
-      </View>
+        </View>
+      ) : (
+        <TouchableOpacity
+          style={styles.startOuterRing}
+          onPress={onStart}
+          activeOpacity={0.75}>
+          <View style={styles.startMiddleRing}>
+            <View style={styles.startCenterBtn}>
+              <Text style={styles.startBtnText}>{startLabel}</Text>
+              {value > 0 ? (
+                <Text style={styles.lastSpeedHint}>
+                  {value.toFixed(1)} {unit}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+        </TouchableOpacity>
+      )}
     </View>
   );
 };
@@ -110,7 +130,7 @@ const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: 4,
+    marginVertical: 6,
   },
   svg: {
     transform: [{ scaleX: 1 }],
@@ -128,14 +148,14 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   valueText: {
-    fontSize: 40,
+    fontSize: 38,
     fontWeight: '800',
     color: '#0F172A',
     fontVariant: ['tabular-nums'],
     letterSpacing: -0.5,
   },
   unitText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: '#64748B',
     marginTop: -2,
@@ -159,4 +179,49 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.8,
   },
+  startOuterRing: {
+    position: 'absolute',
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: 'rgba(0, 163, 137, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  startMiddleRing: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(0, 163, 137, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  startCenterBtn: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#00A389',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 5,
+    borderWidth: 2,
+    borderColor: '#F1F5F9',
+  },
+  startBtnText: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: 1.5,
+  },
+  lastSpeedHint: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#00A389',
+    marginTop: 2,
+  },
 });
+
