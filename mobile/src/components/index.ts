@@ -19,3 +19,4 @@ export * from './ScheduledTestSetupView';
 export * from './DatePickerModal';
 export * from './ContinuousTestProgressView';
 export * from './ContinuousTestResultView';
+export * from './HistoryTestDetailView';

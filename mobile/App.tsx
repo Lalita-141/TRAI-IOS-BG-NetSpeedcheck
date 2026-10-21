@@ -28,11 +28,15 @@ import {
   MapNavIcon,
   HistoryNavIcon,
   SettingsNavIcon,
+  HomeIcon,
+  MapPinIcon,
 } from './src/components/Icons';
+import { LanguageProvider, useTranslation } from './src/i18n';
 
 type TabType = 'SPEED' | 'MAP' | 'HISTORY' | 'SETTINGS';
 
-export default function App() {
+function AppContent() {
+  const { t } = useTranslation();
   const [currentTab, setCurrentTab] = useState<TabType>('SPEED');
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [samplesHistory, setSamplesHistory] = useState<Sample[]>([]);
@@ -130,11 +134,11 @@ export default function App() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" />
+    <SafeAreaView style={[styles.safeArea, currentTab === 'MAP' && styles.safeAreaDark]}>
+      <StatusBar barStyle={currentTab === 'MAP' ? 'light-content' : 'dark-content'} />
 
-        {/* Top Header Bar (Matching EXACT Theme Mockup) */}
-        {!isFullScreenTest && !hideTopBarOnly && (
+        {/* Top Header Bar (Matching EXACT Theme Mockup) - Hidden on MAP tab */}
+        {!isFullScreenTest && !hideTopBarOnly && currentTab !== 'MAP' && (
           <View style={styles.topBar}>
             <View style={styles.brandContainer}>
               <Image
@@ -142,7 +146,7 @@ export default function App() {
                 style={styles.logoImage}
               />
               <View>
-                <Text style={styles.appTitle}>NetSpeed Monitor</Text>
+                <Text style={styles.appTitle}>{t('header_title', 'NetSpeed Monitor')}</Text>
                 <View style={styles.statusIndicatorRow}>
                   <View
                     style={[
@@ -151,7 +155,7 @@ export default function App() {
                     ]}
                   />
                   <Text style={styles.statusSubtitle}>
-                    {status.isRunning ? 'Monitoring Active' : 'Monitoring Idle'}
+                    {status.isRunning ? t('status_active', 'Monitoring Active') : t('status_idle', 'Monitoring Idle')}
                   </Text>
                 </View>
               </View>
@@ -171,12 +175,12 @@ export default function App() {
               ) : status.pendingCount > 0 ? (
                 <>
                   <CloudUploadIcon size={14} color="#D97706" />
-                  <Text style={styles.syncPillPendingText}>{status.pendingCount} Pending</Text>
+                  <Text style={styles.syncPillPendingText}>{status.pendingCount} {t('pending_records', 'Pending')}</Text>
                 </>
               ) : (
                 <>
                   <CloudCheckIcon size={14} color="#00A389" />
-                  <Text style={styles.syncPillSyncedText}>All Synced</Text>
+                  <Text style={styles.syncPillSyncedText}>{t('all_synced', 'All Synced')}</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -203,6 +207,7 @@ export default function App() {
 
           {currentTab === 'MAP' && (
             <CoverageMapView
+              key="map-tab"
               samples={samplesHistory}
               currentLocation={currentLoc}
               onRefresh={loadData}
@@ -212,7 +217,9 @@ export default function App() {
 
           {currentTab === 'HISTORY' && (
             <HistoryView
+              key="history-tab"
               samples={samplesHistory}
+              currentLocation={currentLoc}
               onRefresh={loadData}
               onNavigateTab={tab => setCurrentTab(tab)}
             />
@@ -225,85 +232,109 @@ export default function App() {
           )}
         </View>
 
-        {/* Bottom Navigation Bar (Matching Mockup with Speed, Map, History, Settings) */}
+        {/* Bottom Navigation Bar */}
         {!isFullScreenTest && (
-          <View style={styles.bottomNav}>
+          <View style={[styles.bottomNav, currentTab === 'MAP' && styles.bottomNavDark]}>
             <TouchableOpacity
               style={styles.navItem}
               onPress={() => setCurrentTab('SPEED')}
               activeOpacity={0.7}>
-              <LightningIcon
+              {currentTab === 'MAP' ? (
+                <HomeIcon size={22} color="#94A3B8" />
+              ) : (
+                <LightningIcon
+                  size={22}
+                  color={currentTab === 'SPEED' ? '#00A389' : '#94A3B8'}
+                />
+              )}
+              <Text
+                style={[
+                  styles.navLabel,
+                  currentTab === 'MAP' && styles.navLabelDark,
+                  currentTab === 'SPEED' && styles.navLabelActive,
+                ]}>
+                {currentTab === 'MAP' ? t('nav_home', 'HOME') : t('nav_speed', 'Speed')}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.navItem}
+              onPress={() => {
+                setCurrentTab('HISTORY');
+                loadData();
+              }}
+              activeOpacity={0.7}>
+              <HistoryNavIcon
                 size={22}
-                color={currentTab === 'SPEED' ? '#00A389' : '#94A3B8'}
+                color={currentTab === 'HISTORY' ? '#00A389' : '#94A3B8'}
               />
               <Text
                 style={[
                   styles.navLabel,
-                  currentTab === 'SPEED' && styles.navLabelActive,
+                  currentTab === 'MAP' && styles.navLabelDark,
+                  currentTab === 'HISTORY' && styles.navLabelActive,
                 ]}>
-                Speed
+                {currentTab === 'MAP' ? t('nav_history', 'HISTORY') : t('nav_history', 'History')}
               </Text>
             </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => {
-              setCurrentTab('MAP');
-              loadData();
-            }}
-            activeOpacity={0.7}>
-            <MapNavIcon
-              size={22}
-              color={currentTab === 'MAP' ? '#00A389' : '#94A3B8'}
-            />
-            <Text
-              style={[
-                styles.navLabel,
-                currentTab === 'MAP' && styles.navLabelActive,
-              ]}>
-              Map
-            </Text>
-          </TouchableOpacity>
+            {currentTab === 'MAP' ? (
+              <TouchableOpacity
+                style={styles.activeMapPill}
+                onPress={() => {
+                  setCurrentTab('MAP');
+                  loadData();
+                }}
+                activeOpacity={0.9}>
+                <MapPinIcon size={18} color="#0F172A" />
+                <Text style={styles.activeMapPillLabel}>{t('nav_map', 'MAP')}</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={styles.navItem}
+                onPress={() => {
+                  setCurrentTab('MAP');
+                  loadData();
+                }}
+                activeOpacity={0.7}>
+                <MapNavIcon
+                  size={22}
+                  color="#94A3B8"
+                />
+                <Text style={styles.navLabel}>
+                  {t('nav_map', 'Map')}
+                </Text>
+              </TouchableOpacity>
+            )}
 
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => {
-              setCurrentTab('HISTORY');
-              loadData();
-            }}
-            activeOpacity={0.7}>
-            <HistoryNavIcon
-              size={22}
-              color={currentTab === 'HISTORY' ? '#00A389' : '#94A3B8'}
-            />
-            <Text
-              style={[
-                styles.navLabel,
-                currentTab === 'HISTORY' && styles.navLabelActive,
-              ]}>
-              History
-            </Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.navItem}
+              onPress={() => setCurrentTab('SETTINGS')}
+              activeOpacity={0.7}>
+              <SettingsNavIcon
+                size={22}
+                color={currentTab === 'SETTINGS' ? '#00A389' : '#94A3B8'}
+              />
+              <Text
+                style={[
+                  styles.navLabel,
+                  currentTab === 'MAP' && styles.navLabelDark,
+                  currentTab === 'SETTINGS' && styles.navLabelActive,
+                ]}>
+                {currentTab === 'MAP' ? t('nav_settings', 'SETTINGS') : t('nav_settings', 'Settings')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </SafeAreaView>
+  );
+}
 
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setCurrentTab('SETTINGS')}
-            activeOpacity={0.7}>
-            <SettingsNavIcon
-              size={22}
-              color={currentTab === 'SETTINGS' ? '#00A389' : '#94A3B8'}
-            />
-            <Text
-              style={[
-                styles.navLabel,
-                currentTab === 'SETTINGS' && styles.navLabelActive,
-              ]}>
-              Settings
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
-    </SafeAreaView>
+export default function App() {
+  return (
+    <LanguageProvider>
+      <AppContent />
+    </LanguageProvider>
   );
 }
 
@@ -415,5 +446,39 @@ const styles = StyleSheet.create({
   navLabelActive: {
     color: '#00A389',
     fontWeight: '700',
+  },
+  safeAreaDark: {
+    backgroundColor: '#0B0F19',
+  },
+  bottomNavDark: {
+    backgroundColor: '#0B0F19',
+    borderTopColor: '#1E293B',
+    paddingVertical: 6,
+  },
+  navLabelDark: {
+    color: '#94A3B8',
+    fontSize: 9.5,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  activeMapPill: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    paddingVertical: 5,
+    paddingHorizontal: 22,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  activeMapPillLabel: {
+    color: '#0F172A',
+    fontSize: 10,
+    fontWeight: '800',
+    marginTop: 2,
   },
 });
