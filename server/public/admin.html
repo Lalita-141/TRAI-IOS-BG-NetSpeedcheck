@@ -424,7 +424,9 @@
           const lastDate = new Date(d.last_active * 1000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
           return `
             <tr>
-              <td style="font-family: monospace; color: #60A5FA;">${d.device_id}</td>
+              <td style="font-family: monospace; color: #60A5FA; cursor: pointer;" title="Click to view all tests for this device" onclick="filterByDevice('${d.device_id}')">
+                <i class="fa-solid fa-magnifying-glass"></i> ${d.device_id}
+              </td>
               <td>${d.device_model || 'Apple iPhone'}</td>
               <td>${d.os_platform || 'iOS'}</td>
               <td><b>${d.carrier || '--'}</b></td>
@@ -438,6 +440,12 @@
       } catch (err) {
         console.error('Failed to load devices:', err);
       }
+    }
+
+    function filterByDevice(deviceId) {
+      switchTab('samples');
+      document.getElementById('filter-search').value = deviceId;
+      loadSamples();
     }
 
     function exportData() {
