@@ -20,12 +20,10 @@ app.use(
   })
 );
 
-// Serve static assets for the Admin Dashboard
-app.use('/static', express.static(path.join(__dirname, 'public')));
-
-// Serve the Admin Dashboard at /admin
-app.get('/admin', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+// Serve static assets for the React Admin Dashboard
+app.use('/admin', express.static(path.join(__dirname, 'public')));
+app.get(/^\/admin(\/.*)?$/, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // --- 1. Real-Time Network Speed Test Endpoints ---
