@@ -16,7 +16,8 @@ const dbConfig = {
 const pool = mysql.createPool(dbConfig);
 
 /**
- * Initializes MySQL database and table schema automatically on boot.
+ * Initializes MySQL database and table schema automatically on boot,
+ * including auto-migration for newly added columns.
  */
 async function initDatabase() {
   try {
@@ -33,12 +34,13 @@ async function initDatabase() {
     );
     await tempConnection.end();
 
-    // 2. Ensure table schema and indexes exist
+    // 2. Ensure base table schema exists
     const createTableSql = `
       CREATE TABLE IF NOT EXISTS samples (
         id VARCHAR(64) PRIMARY KEY,
         device_id VARCHAR(64) NOT NULL,
         ts DOUBLE NOT NULL,
+        test_type VARCHAR(32) DEFAULT 'speed',
         down_mbps DOUBLE NULL,
         up_mbps DOUBLE NULL,
         latency_ms DOUBLE NULL,
@@ -53,14 +55,58 @@ async function initDatabase() {
         lat DOUBLE NULL,
         lng DOUBLE NULL,
         accuracy DOUBLE NULL,
+        video_delay_ms INT NULL,
+        web_delay_ms INT NULL,
+        page_load_sec DOUBLE NULL,
+        ttfb_ms INT NULL,
+        streaming_quality VARCHAR(32) NULL,
+        buffering_rate VARCHAR(32) NULL,
+        signal_dbm DOUBLE NULL,
+        signal_quality VARCHAR(32) NULL,
+        cell_tower VARCHAR(64) NULL,
+        frequency_band VARCHAR(32) NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_samples_ts (ts),
-        INDEX idx_samples_device_id (device_id)
+        INDEX idx_samples_device_id (device_id),
+        INDEX idx_samples_carrier (carrier),
+        INDEX idx_samples_radio (radio)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `;
-
     await pool.query(createTableSql);
-    console.log(`[MySQL] Database "${dbConfig.database}" and table "samples" verified.`);
+
+    // 3. Schema Auto-Migration: add any columns if migrating an existing table
+    const columnsToAdd = [
+      { name: 'test_type', type: "VARCHAR(32) DEFAULT 'speed'" },
+      { name: 'video_delay_ms', type: 'INT NULL' },
+      { name: 'web_delay_ms', type: 'INT NULL' },
+      { name: 'page_load_sec', type: 'DOUBLE NULL' },
+      { name: 'ttfb_ms', type: 'INT NULL' },
+      { name: 'streaming_quality', type: 'VARCHAR(32) NULL' },
+      { name: 'buffering_rate', type: 'VARCHAR(32) NULL' },
+      { name: 'signal_dbm', type: 'DOUBLE NULL' },
+      { name: 'signal_quality', type: 'VARCHAR(32) NULL' },
+      { name: 'cell_tower', type: 'VARCHAR(64) NULL' },
+      { name: 'frequency_band', type: 'VARCHAR(32) NULL' },
+    ];
+
+    const [existingCols] = await pool.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'samples'`,
+      [dbConfig.database]
+    );
+    const existingColSet = new Set(existingCols.map(c => c.COLUMN_NAME.toLowerCase()));
+
+    for (const col of columnsToAdd) {
+      if (!existingColSet.has(col.name.toLowerCase())) {
+        try {
+          await pool.query(`ALTER TABLE samples ADD COLUMN ${col.name} ${col.type}`);
+          console.log(`[Schema Migration] Added column "${col.name}" to samples table.`);
+        } catch (e) {
+          // Non-fatal if column already exists
+        }
+      }
+    }
+
+    console.log(`[MySQL] Database "${dbConfig.database}" and table "samples" verified with TRAI schema.`);
     return true;
   } catch (err) {
     console.error(`[MySQL Connection Error] Unable to connect to MySQL at ${dbConfig.host}:${dbConfig.port}:`, err.message);
