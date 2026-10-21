@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
+const https = require('https');
 require('dotenv').config();
 
 const { pool, initDatabase } = require('./db');
@@ -17,6 +19,12 @@ app.use(
     credentials: true,
   })
 );
+
+// Serve static assets for the React Admin Dashboard
+app.use('/admin', express.static(path.join(__dirname, 'public')));
+app.get(/^\/admin(\/.*)?$/, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 // --- 1. Real-Time Network Speed Test Endpoints ---
 
@@ -64,6 +72,64 @@ app.post(
   }
 );
 
+// Video Streaming Latency Probe (Serves a chunked stream to measure initial buffering delay)
+app.get('/test-video', (req, res) => {
+  const videoBuffer = Buffer.alloc(1024 * 1024 * 2); // 2 MB synthetic video stream
+  res.writeHead(200, {
+    'Content-Type': 'video/mp4',
+    'Content-Length': videoBuffer.length,
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'no-cache',
+  });
+  res.end(videoBuffer);
+});
+
+// Browsing Latency Probe (Returns a lightweight benchmark page to measure TTFB & Page Load Time)
+app.get('/test-webpage', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/html',
+    'Cache-Control': 'no-cache, no-store',
+  });
+  res.end(`<!DOCTYPE html><html><head><title>QoS Benchmark</title></head><body><h1>TRAI QoS Web Test</h1><p>Measuring TTFB and Render Timing.</p></body></html>`);
+});
+
+// Location Search Proxy for Map Screen (Free OpenStreetMap Nominatim Geocoding)
+app.get('/v1/locations/search', (req, res) => {
+  const query = (req.query.q || '').trim();
+  if (!query || query.length < 2) {
+    return res.json([]);
+  }
+
+  const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=in&q=${encodeURIComponent(query)}&limit=5`;
+  const options = {
+    headers: {
+      'User-Agent': 'TRAI-MySpeed-Monitor/2.0 (contact@hareandturtle.ai)',
+    },
+  };
+
+  https
+    .get(url, options, apiRes => {
+      let data = '';
+      apiRes.on('data', chunk => (data += chunk));
+      apiRes.on('end', () => {
+        try {
+          const list = JSON.parse(data);
+          const results = list.map(item => ({
+            name: item.display_name,
+            lat: parseFloat(item.lat),
+            lng: parseFloat(item.lon),
+          }));
+          res.json(results);
+        } catch (e) {
+          res.json([]);
+        }
+      });
+    })
+    .on('error', err => {
+      res.json([]);
+    });
+});
+
 // --- 2. Middleware for Telemetry APIs ---
 app.use(express.json({ limit: '10mb' }));
 
@@ -72,12 +138,19 @@ app.get('/', (req, res) => {
   res.json({
     status: 'online',
     service: 'Network Speed Monitor Server (Node.js & MySQL)',
+    admin_dashboard: '/admin',
     retention_period_days: RETENTION_DAYS,
     endpoints: {
       ping: '/ping',
       download: '/download?mb=2',
       upload: '/upload',
+      test_video: '/test-video',
+      test_webpage: '/test-webpage',
+      crowdsource_map: '/v1/crowdsource/map',
+      location_search: '/v1/locations/search?q=delhi',
       samples: '/v1/speed-samples',
+      admin_stats: '/v1/admin/stats',
+      admin_devices: '/v1/admin/devices',
       data_retention: '/v1/privacy/data-retention',
     },
   });
@@ -97,7 +170,7 @@ async function purgeExpiredSamples(days = RETENTION_DAYS) {
   }
 }
 
-// Ingest Batch of Speed Samples (Idempotent via INSERT IGNORE)
+// Ingest Batch of Speed, Video or Coverage Samples
 app.post('/v1/speed-samples', async (req, res) => {
   const batch = req.body;
   const samples = batch?.samples;
@@ -110,6 +183,7 @@ app.post('/v1/speed-samples', async (req, res) => {
     s.id,
     s.device_id,
     s.ts,
+    s.test_type || 'speed',
     s.down_mbps ?? null,
     s.up_mbps ?? null,
     s.latency_ms ?? null,
@@ -124,20 +198,33 @@ app.post('/v1/speed-samples', async (req, res) => {
     s.lat ?? null,
     s.lng ?? null,
     s.accuracy ?? null,
+    s.video_delay_ms ?? null,
+    s.web_delay_ms ?? null,
+    s.page_load_sec ?? null,
+    s.ttfb_ms ?? null,
+    s.streaming_quality ?? null,
+    s.buffering_rate ?? null,
+    s.signal_dbm ?? null,
+    s.signal_quality ?? null,
+    s.cell_tower ?? null,
+    s.frequency_band ?? null,
   ]);
 
   try {
-    // 1. Idempotent bulk insertion
+    // Idempotent bulk insertion
     const insertSql = `
       INSERT IGNORE INTO samples (
-        id, device_id, ts, down_mbps, up_mbps, latency_ms,
+        id, device_id, ts, test_type, down_mbps, up_mbps, latency_ms,
         jitter_ms, packet_loss_pct, network, radio, carrier,
-        device_model, os_platform, location_type, lat, lng, accuracy
+        device_model, os_platform, location_type, lat, lng, accuracy,
+        video_delay_ms, web_delay_ms, page_load_sec, ttfb_ms,
+        streaming_quality, buffering_rate, signal_dbm, signal_quality,
+        cell_tower, frequency_band
       ) VALUES ?
     `;
     await pool.query(insertSql, [rows]);
 
-    // 2. Opportunistic cleanup of expired records
+    // Opportunistic cleanup of expired records
     const prunedCount = await purgeExpiredSamples(RETENTION_DAYS);
 
     return res.json({
@@ -150,7 +237,269 @@ app.post('/v1/speed-samples', async (req, res) => {
   }
 });
 
-// Admin Query Endpoint for Telemetry Samples
+// --- 3. Crowdsourced Map API (For Mobile App Map Screen) ---
+app.get('/v1/crowdsource/map', async (req, res) => {
+  const { operator, carrier, technology, radio, metric = 'Coverage', minLat, maxLat, minLng, maxLng } = req.query;
+  const opFilter = operator || carrier;
+  const techFilter = technology || radio;
+  const limit = Math.min(parseInt(req.query.limit, 10) || 500, 2000);
+
+  const conditions = ['lat IS NOT NULL', 'lng IS NOT NULL'];
+  const params = [];
+
+  if (opFilter && opFilter.toLowerCase() !== 'all') {
+    conditions.push('LOWER(carrier) LIKE ?');
+    params.push(`%${opFilter.toLowerCase()}%`);
+  }
+
+  if (techFilter && techFilter.toLowerCase() !== 'all') {
+    conditions.push('LOWER(radio) LIKE ?');
+    params.push(`%${techFilter.toLowerCase()}%`);
+  }
+
+  if (minLat && maxLat && minLng && maxLng) {
+    conditions.push('lat BETWEEN ? AND ?', 'lng BETWEEN ? AND ?');
+    params.push(parseFloat(minLat), parseFloat(maxLat), parseFloat(minLng), parseFloat(maxLng));
+  }
+
+  const sql = `
+    SELECT id, device_id, ts, down_mbps, up_mbps, latency_ms, jitter_ms,
+           packet_loss_pct, network, radio, carrier, signal_dbm, signal_quality,
+           lat, lng, accuracy, test_type
+    FROM samples
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY ts DESC
+    LIMIT ?
+  `;
+  params.push(limit);
+
+  try {
+    const [rows] = await pool.query(sql, params);
+
+    // Compute Color and Rating for each point based on selected metric
+    const formatted = rows.map(r => {
+      let metricValue = 0;
+      let rating = 'Good';
+      let color = '#F59E0B'; // Amber default
+
+      const mLower = (metric || '').toLowerCase();
+      if (mLower === 'download' || mLower === 'download speed') {
+        metricValue = r.down_mbps || 0;
+        if (metricValue >= 50) { rating = 'Excellent'; color = '#10B981'; }
+        else if (metricValue >= 25) { rating = 'Better'; color = '#06B6D4'; }
+        else if (metricValue >= 10) { rating = 'Good'; color = '#F59E0B'; }
+        else { rating = 'Poor'; color = '#EF4444'; }
+      } else if (mLower === 'upload' || mLower === 'upload speed') {
+        metricValue = r.up_mbps || 0;
+        if (metricValue >= 20) { rating = 'Excellent'; color = '#10B981'; }
+        else if (metricValue >= 10) { rating = 'Better'; color = '#06B6D4'; }
+        else if (metricValue >= 5) { rating = 'Good'; color = '#F59E0B'; }
+        else { rating = 'Poor'; color = '#EF4444'; }
+      } else if (mLower === 'latency') {
+        metricValue = r.latency_ms || 999;
+        if (metricValue < 25) { rating = 'Excellent'; color = '#10B981'; }
+        else if (metricValue < 50) { rating = 'Better'; color = '#06B6D4'; }
+        else if (metricValue < 100) { rating = 'Good'; color = '#F59E0B'; }
+        else { rating = 'Poor'; color = '#EF4444'; }
+      } else {
+        // Coverage / Signal dBm (Default)
+        metricValue = r.signal_dbm != null ? r.signal_dbm : (r.down_mbps && r.down_mbps > 25 ? -82 : -96);
+        if (metricValue >= -85) { rating = 'Excellent'; color = '#10B981'; }
+        else if (metricValue >= -95) { rating = 'Better'; color = '#06B6D4'; }
+        else if (metricValue >= -105) { rating = 'Good'; color = '#F59E0B'; }
+        else { rating = 'Poor'; color = '#EF4444'; }
+      }
+
+      return {
+        id: r.id,
+        lat: r.lat,
+        lng: r.lng,
+        carrier: r.carrier || 'Unknown',
+        radio: r.radio || 'Mobile',
+        down_mbps: r.down_mbps,
+        up_mbps: r.up_mbps,
+        latency_ms: r.latency_ms,
+        signal_dbm: r.signal_dbm,
+        test_type: r.test_type,
+        ts: r.ts,
+        metric: metric,
+        metric_value: metricValue,
+        rating: rating,
+        color: color,
+      };
+    });
+
+    return res.json(formatted);
+  } catch (err) {
+    console.error('[Map API Error]:', err.message);
+    return res.status(500).json({ error: 'Failed to retrieve crowdsourced map data.' });
+  }
+});
+
+// --- 4. Admin Dashboard APIs ---
+
+// High-Level KPIs
+app.get('/v1/admin/stats', async (req, res) => {
+  try {
+    const todayTs = Math.floor(new Date().setHours(0, 0, 0, 0) / 1000);
+
+    const [totalRows] = await pool.query('SELECT COUNT(*) AS total, AVG(down_mbps) AS avg_down, AVG(up_mbps) AS avg_up, AVG(latency_ms) AS avg_lat FROM samples');
+    const [deviceRows] = await pool.query('SELECT COUNT(DISTINCT device_id) AS total_devices FROM samples');
+    const [todayRows] = await pool.query('SELECT COUNT(*) AS tests_today FROM samples WHERE ts >= ?', [todayTs]);
+    const [topCarrierRows] = await pool.query('SELECT carrier, AVG(down_mbps) AS avg_speed FROM samples WHERE carrier IS NOT NULL AND carrier != "--" GROUP BY carrier ORDER BY avg_speed DESC LIMIT 1');
+
+    return res.json({
+      total_tests: totalRows[0]?.total || 0,
+      total_devices: deviceRows[0]?.total_devices || 0,
+      tests_today: todayRows[0]?.tests_today || 0,
+      avg_down_mbps: totalRows[0]?.avg_down || 0,
+      avg_up_mbps: totalRows[0]?.avg_up || 0,
+      avg_latency_ms: totalRows[0]?.avg_lat || 0,
+      top_carrier: topCarrierRows[0]?.carrier || 'Airtel',
+    });
+  } catch (err) {
+    console.error('[Admin Stats Error]:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch admin statistics.' });
+  }
+});
+
+// Operator Speed Benchmarks
+app.get('/v1/admin/operator-analytics', async (req, res) => {
+  try {
+    const sql = `
+      SELECT carrier, radio, 
+             AVG(down_mbps) AS avg_down, 
+             AVG(up_mbps) AS avg_up, 
+             AVG(latency_ms) AS avg_latency,
+             COUNT(*) AS test_count
+      FROM samples
+      WHERE carrier IS NOT NULL AND carrier != '--' AND carrier != ''
+      GROUP BY carrier, radio
+      ORDER BY avg_down DESC
+      LIMIT 10
+    `;
+    const [rows] = await pool.query(sql);
+    return res.json(rows);
+  } catch (err) {
+    console.error('[Operator Analytics Error]:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch operator analytics.' });
+  }
+});
+
+// Devices / Users Directory
+app.get('/v1/admin/devices', async (req, res) => {
+  const search = (req.query.search || '').trim();
+  const conditions = ['device_id IS NOT NULL'];
+  const params = [];
+
+  if (search) {
+    conditions.push('device_id LIKE ?');
+    params.push(`%${search}%`);
+  }
+
+  const sql = `
+    SELECT device_id,
+           MAX(device_model) AS device_model,
+           MAX(os_platform) AS os_platform,
+           MAX(carrier) AS carrier,
+           COUNT(*) AS total_tests,
+           AVG(down_mbps) AS avg_down,
+           AVG(latency_ms) AS avg_latency,
+           MAX(ts) AS last_active
+    FROM samples
+    WHERE ${conditions.join(' AND ')}
+    GROUP BY device_id
+    ORDER BY last_active DESC
+    LIMIT 100
+  `;
+
+  try {
+    const [rows] = await pool.query(sql, params);
+    return res.json(rows);
+  } catch (err) {
+    console.error('[Admin Devices Error]:', err.message);
+    return res.status(500).json({ error: 'Failed to retrieve devices.' });
+  }
+});
+
+// Drill-Down: Specific Device Samples
+app.get('/v1/admin/devices/:device_id/samples', async (req, res) => {
+  const cleanId = (req.params.device_id || '').trim();
+  try {
+    const [rows] = await pool.query('SELECT * FROM samples WHERE device_id = ? ORDER BY ts DESC LIMIT 100', [cleanId]);
+    return res.json(rows);
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to fetch device samples.' });
+  }
+});
+
+// Filterable Telemetry Samples
+app.get('/v1/admin/samples', async (req, res) => {
+  const { search, carrier, radio, test_type } = req.query;
+  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 500);
+
+  const conditions = ['1=1'];
+  const params = [];
+
+  if (search) {
+    conditions.push('(device_id LIKE ? OR id LIKE ?)');
+    params.push(`%${search}%`, `%${search}%`);
+  }
+  if (carrier) {
+    conditions.push('LOWER(carrier) LIKE ?');
+    params.push(`%${carrier.toLowerCase()}%`);
+  }
+  if (radio) {
+    conditions.push('LOWER(radio) LIKE ?');
+    params.push(`%${radio.toLowerCase()}%`);
+  }
+  if (test_type) {
+    conditions.push('test_type = ?');
+    params.push(test_type);
+  }
+
+  const sql = `
+    SELECT * FROM samples
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY ts DESC
+    LIMIT ?
+  `;
+  params.push(limit);
+
+  try {
+    const [rows] = await pool.query(sql, params);
+    return res.json(rows);
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to fetch samples.' });
+  }
+});
+
+// CSV Export for Reporting
+app.get('/v1/admin/export', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM samples ORDER BY ts DESC LIMIT 5000');
+    if (rows.length === 0) {
+      return res.status(404).send('No data available to export.');
+    }
+
+    const headers = Object.keys(rows[0]).join(',');
+    const csvLines = rows.map(r =>
+      Object.values(r)
+        .map(v => (v === null ? '' : `"${String(v).replace(/"/g, '""')}"`))
+        .join(',')
+    );
+
+    const csvContent = [headers, ...csvLines].join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="TRAI_MySpeed_Telemetry_Report.csv"');
+    return res.send(csvContent);
+  } catch (err) {
+    console.error('[CSV Export Error]:', err.message);
+    return res.status(500).send('CSV export failed.');
+  }
+});
+
+// Legacy raw query for backwards compatibility
 app.get('/v1/speed-samples', async (req, res) => {
   const apiKey = req.headers['x-admin-key'] || req.query.api_key;
   if (!apiKey || apiKey !== ADMIN_API_KEY) {
@@ -166,12 +515,11 @@ app.get('/v1/speed-samples', async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM samples ORDER BY ts DESC LIMIT ?', [limit]);
     return res.json(rows);
   } catch (err) {
-    console.error('[List Samples Error]:', err.message);
     return res.status(500).json({ error: 'Failed to retrieve telemetry records.' });
   }
 });
 
-// Public Data Retention Policy Disclosure (Required for Apple App Store compliance)
+// Public Data Retention Policy Disclosure
 app.get('/v1/privacy/data-retention', (req, res) => {
   res.json({
     policy_title: 'Data Retention and Deletion',
@@ -243,7 +591,7 @@ app.post('/v1/admin/retention-purge', async (req, res) => {
   }
 });
 
-// --- 3. Server Startup & Background Periodic Cleaner ---
+// --- 5. Server Startup & Background Periodic Cleaner ---
 async function startServer() {
   // Initialize MySQL schema automatically
   const dbReady = await initDatabase();
@@ -276,9 +624,10 @@ async function startServer() {
   // Bind to 0.0.0.0 so iOS devices on the local Wi-Fi network can reach the server
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`====================================================`);
-    console.log(`  NetSpeed QoS Server (Node.js & MySQL) is running`);
-    console.log(`  Listening on: http://0.0.0.0:${PORT}`);
-    console.log(`  Test ping:    http://localhost:${PORT}/ping`);
+    console.log(`  TRAI MySpeed QoS Server (Node.js & MySQL) is running`);
+    console.log(`  Listening on:     http://0.0.0.0:${PORT}`);
+    console.log(`  Admin Dashboard:  http://localhost:${PORT}/admin`);
+    console.log(`  Crowdsource Map:  http://localhost:${PORT}/v1/crowdsource/map`);
     console.log(`====================================================`);
   });
 }
