@@ -259,6 +259,7 @@ class MonitorService {
         lat: loc.lat,
         lng: loc.lng,
         accuracy: loc.accuracy,
+        test_type: 'speed',
       };
 
       // Save to queue

@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import Svg, { Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
+import { useTranslation } from '../i18n';
 
 interface SpeedGaugeProps {
   value: number; // e.g., Mbps or ms
@@ -16,13 +17,16 @@ interface SpeedGaugeProps {
 export const SpeedGauge: React.FC<SpeedGaugeProps> = ({
   value = 0,
   maxValue = 100,
-  label = 'DOWNLOAD',
+  label,
   unit = 'Mbps',
   phase = 'idle',
   isTesting = false,
   onStart,
-  startLabel = 'START',
+  startLabel,
 }) => {
+  const { t } = useTranslation();
+  const effectiveStartLabel = startLabel || t('start_btn', 'START');
+  const effectiveLabel = label || t('download', 'DOWNLOAD');
   const size = 220;
   const strokeWidth = 14;
   const radius = (size - strokeWidth) / 2;
@@ -95,7 +99,7 @@ export const SpeedGauge: React.FC<SpeedGaugeProps> = ({
       {/* Center Reading or START Button */}
       {isTesting ? (
         <View style={styles.centerContent} pointerEvents="none">
-          <Text style={styles.label}>{label.toUpperCase()}</Text>
+          <Text style={styles.label}>{effectiveLabel.toUpperCase()}</Text>
           <Text style={styles.valueText}>
             {value > 0 ? value.toFixed(value >= 10 ? 1 : 2) : '0.0'}
           </Text>
@@ -112,7 +116,13 @@ export const SpeedGauge: React.FC<SpeedGaugeProps> = ({
           activeOpacity={0.75}>
           <View style={styles.startMiddleRing}>
             <View style={styles.startCenterBtn}>
-              <Text style={styles.startBtnText}>{startLabel}</Text>
+              <Text
+                style={styles.startBtnText}
+                numberOfLines={1}
+                adjustsFontSizeToFit={true}
+                minimumFontScale={0.65}>
+                {effectiveStartLabel}
+              </Text>
               {value > 0 ? (
                 <Text style={styles.lastSpeedHint}>
                   {value.toFixed(1)} {unit}
@@ -203,6 +213,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 6,
     shadowColor: '#00A389',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
@@ -215,7 +226,8 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '900',
     color: '#0F172A',
-    letterSpacing: 1.5,
+    letterSpacing: 1,
+    textAlign: 'center',
   },
   lastSpeedHint: {
     fontSize: 10,

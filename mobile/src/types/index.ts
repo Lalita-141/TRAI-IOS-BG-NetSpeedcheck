@@ -16,6 +16,7 @@ export interface Sample {
   lat: number | null;
   lng: number | null;
   accuracy: number | null;
+  test_type?: 'speed' | 'video' | 'coverage' | 'advance' | string;
 }
 
 export interface AppConfig {

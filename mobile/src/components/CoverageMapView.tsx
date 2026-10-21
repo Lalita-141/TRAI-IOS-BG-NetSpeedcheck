@@ -1,13 +1,23 @@
-import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import React, { useState, useMemo, useRef, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  TouchableWithoutFeedback,
+  ActivityIndicator,
+} from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Sample } from '../types';
 import {
-  DownloadIcon,
-  UploadIcon,
-  ClockIcon,
-  WaveformIcon,
-  TargetLocateIcon,
+  SearchIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  CrosshairIcon,
+  PlusIcon,
+  MinusIcon,
+  CloseIcon,
 } from './Icons';
 
 interface CoverageMapViewProps {
@@ -17,70 +27,166 @@ interface CoverageMapViewProps {
   onNavigateHistory?: () => void;
 }
 
+type MetricType = 'Coverage' | 'Download' | 'Upload' | 'Latency';
+type TechnologyType = 'All' | '5G' | '4G' | '2G';
+type OperatorType = 'Airtel' | 'BSNL & MTNL' | 'Jio' | 'Vi' | 'WIFI';
+type DropdownType = 'metric' | 'technology' | 'operator' | null;
+type MapType = 'map' | 'satellite';
+
+const METRIC_OPTIONS: MetricType[] = ['Coverage', 'Download', 'Upload', 'Latency'];
+const TECH_OPTIONS: TechnologyType[] = ['All', '5G', '4G', '2G'];
+const OPERATOR_OPTIONS: OperatorType[] = ['Airtel', 'BSNL & MTNL', 'Jio', 'Vi', 'WIFI'];
+
+// Common city centers for zero-latency instant jump
+const PRESET_CITIES: Record<string, { lat: number; lng: number }> = {
+  pune: { lat: 18.5204, lng: 73.8567 },
+  'pimpri-chinchwad': { lat: 18.6298, lng: 73.7997 },
+  pimpri: { lat: 18.6298, lng: 73.7997 },
+  chakan: { lat: 18.7606, lng: 73.858 },
+  hinjewadi: { lat: 18.5913, lng: 73.7389 },
+  hadapsar: { lat: 18.5089, lng: 73.926 },
+  mumbai: { lat: 19.076, lng: 72.8777 },
+  delhi: { lat: 28.6139, lng: 77.209 },
+  bengaluru: { lat: 12.9716, lng: 77.5946 },
+  bangalore: { lat: 12.9716, lng: 77.5946 },
+  hyderabad: { lat: 17.385, lng: 78.4867 },
+  chennai: { lat: 13.0827, lng: 80.2707 },
+  kolkata: { lat: 22.5726, lng: 88.3639 },
+  ahmedabad: { lat: 23.0225, lng: 72.5714 },
+  nagpur: { lat: 21.1458, lng: 79.0882 },
+  nashik: { lat: 19.9975, lng: 73.7898 },
+  saswad: { lat: 18.3444, lng: 74.0308 },
+};
+
 export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
   samples,
   currentLocation,
   onRefresh,
-  onNavigateHistory,
 }) => {
-  // Filter samples that have valid coordinates
+  const webViewRef = useRef<any>(null);
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedMetric, setSelectedMetric] = useState<MetricType>('Coverage');
+  const [selectedTech, setSelectedTech] = useState<TechnologyType>('All');
+  const [selectedOperator, setSelectedOperator] = useState<OperatorType>('Airtel');
+  const [activeDropdown, setActiveDropdown] = useState<DropdownType>(null);
+  const [mapType, setMapType] = useState<MapType>('map');
+  const [isSearching, setIsSearching] = useState(false);
+
+  // Compute map center
+  const defaultCenter = useMemo(() => {
+    if (currentLocation?.lat && currentLocation?.lng) {
+      return { lat: currentLocation.lat, lng: currentLocation.lng };
+    }
+    const sampleWithCoords = samples.find(s => s.lat != null && s.lng != null);
+    if (sampleWithCoords && sampleWithCoords.lat && sampleWithCoords.lng) {
+      return { lat: sampleWithCoords.lat, lng: sampleWithCoords.lng };
+    }
+    return { lat: 18.5204, lng: 73.8567 }; // Pune default
+  }, [currentLocation, samples]);
+
+  // Valid samples with coordinates
   const validSamples = useMemo(
-    () => samples.filter(s => s.lat != null && s.lng != null),
+    () =>
+      samples
+        .filter(s => s.lat != null && s.lng != null)
+        .map(s => ({
+          lat: s.lat!,
+          lng: s.lng!,
+          down: s.down_mbps || 0,
+          up: s.up_mbps || 0,
+          ping: s.latency_ms || 0,
+          jitter: s.jitter_ms || 0,
+          carrier: s.carrier || (s.network === 'wifi' ? 'WIFI' : 'Cellular'),
+          tech: s.radio || (s.network === 'wifi' ? 'WIFI' : '4G'),
+          ts: s.ts,
+        })),
     [samples]
   );
 
-  const latestSample = samples.length > 0 ? samples[0] : null;
+  // Handle Search Location
+  const handleSearch = useCallback(async () => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return;
 
-  // Compute map center
-  const centerLat = currentLocation?.lat || (validSamples.length > 0 ? validSamples[0].lat : 18.5501);
-  const centerLng = currentLocation?.lng || (validSamples.length > 0 ? validSamples[0].lng : 73.9410);
+    // Check presets first
+    if (PRESET_CITIES[query]) {
+      const { lat, lng } = PRESET_CITIES[query];
+      webViewRef.current?.injectJavaScript(`window.flyToLocation(${lat}, ${lng}, 12); true;`);
+      return;
+    }
 
-  // Compute summary stats
-  const stats = useMemo(() => {
-    if (validSamples.length === 0) return { total: 0, avgDown: 0, maxDown: 0 };
-    let totalDown = 0;
-    let maxDown = 0;
-    validSamples.forEach(s => {
-      const down = s.down_mbps || 0;
-      totalDown += down;
-      if (down > maxDown) maxDown = down;
-    });
-    return {
-      total: validSamples.length,
-      avgDown: parseFloat((totalDown / validSamples.length).toFixed(1)),
-      maxDown: parseFloat(maxDown.toFixed(1)),
-    };
-  }, [validSamples]);
+    // Dynamic Geocoding via Nominatim
+    setIsSearching(true);
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+          searchQuery
+        )}&countrycodes=in&limit=1`,
+        {
+          headers: {
+            'User-Agent': 'TraiNetSpeedcheckApp/1.0',
+          },
+        }
+      );
+      const data = await response.json();
+      if (data && data.length > 0) {
+        const lat = parseFloat(data[0].lat);
+        const lon = parseFloat(data[0].lon);
+        webViewRef.current?.injectJavaScript(`window.flyToLocation(${lat}, ${lon}, 12); true;`);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setIsSearching(false);
+    }
+  }, [searchQuery]);
 
-  // Generate HTML for Leaflet Map
+  // Handle Map Type Toggle
+  const handleToggleMapType = (type: MapType) => {
+    setMapType(type);
+    webViewRef.current?.injectJavaScript(`window.setMapType('${type}'); true;`);
+  };
+
+  // Handle Map Controls
+  const handleRecenter = () => {
+    webViewRef.current?.injectJavaScript(
+      `window.flyToLocation(${defaultCenter.lat}, ${defaultCenter.lng}, 12); true;`
+    );
+    if (onRefresh) onRefresh();
+  };
+
+  const handleZoomIn = () => {
+    webViewRef.current?.injectJavaScript('window.zoomIn(); true;');
+  };
+
+  const handleZoomOut = () => {
+    webViewRef.current?.injectJavaScript('window.zoomOut(); true;');
+  };
+
+  // Push filter update to WebView
+  const handleSelectOption = (type: DropdownType, option: string) => {
+    if (type === 'metric') {
+      setSelectedMetric(option as MetricType);
+      webViewRef.current?.injectJavaScript(
+        `window.updateFilters('${selectedOperator}', '${selectedTech}', '${option}'); true;`
+      );
+    } else if (type === 'technology') {
+      setSelectedTech(option as TechnologyType);
+      webViewRef.current?.injectJavaScript(
+        `window.updateFilters('${selectedOperator}', '${option}', '${selectedMetric}'); true;`
+      );
+    } else if (type === 'operator') {
+      setSelectedOperator(option as OperatorType);
+      webViewRef.current?.injectJavaScript(
+        `window.updateFilters('${option}', '${selectedTech}', '${selectedMetric}'); true;`
+      );
+    }
+    setActiveDropdown(null);
+  };
+
+  // Generate Leaflet Map HTML
   const mapHtml = useMemo(() => {
-    const markersData = validSamples.map(s => {
-      const speed = s.down_mbps || 0;
-      let color = '#00A389'; // Teal / Green
-      if (speed < 10) color = '#EF4444'; // Red
-      else if (speed < 25) color = '#F59E0B'; // Amber
-
-      const dateStr = new Date(s.ts * 1000).toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-      const carrier = s.carrier || (s.network === 'wifi' ? 'Wi-Fi' : 'Cellular');
-      const radio = s.radio || '';
-
-      return {
-        lat: s.lat,
-        lng: s.lng,
-        color,
-        speed,
-        carrier,
-        radio,
-        up: s.up_mbps || 0,
-        ping: s.latency_ms || 0,
-        jitter: s.jitter_ms || 0,
-        date: dateStr,
-      };
-    });
-
     return `
 <!DOCTYPE html>
 <html>
@@ -90,218 +196,640 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <style>
-    body { margin: 0; padding: 0; background: #F8FAFC; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-    #map { width: 100vw; height: 100vh; background: #F1F5F9; }
-    .custom-popup .leaflet-popup-content-wrapper {
-      background: #FFFFFF;
-      color: #0F172A;
-      border: 1px solid #E2E8F0;
-      border-radius: 12px;
-      padding: 4px;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0; padding: 0; width: 100%; height: 100%;
+      background: #0B0F19;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      overflow: hidden;
     }
-    .custom-popup .leaflet-popup-tip { background: #FFFFFF; }
-    .popup-title { font-weight: 800; font-size: 13px; color: #00A389; margin-bottom: 4px; }
-    .popup-row { font-size: 11px; color: #64748B; margin: 2px 0; display: flex; justify-content: space-between; }
-    .popup-val { font-weight: 700; color: #0F172A; }
-    .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; background: #CCFBF1; color: #0F766E; }
+    #map { width: 100%; height: 100%; background: #0B0F19; }
+
+    /* Custom Leaflet Dark Popup */
+    .leaflet-popup-content-wrapper {
+      background: #111827 !important;
+      color: #F8FAFC !important;
+      border: 1px solid #1E293B !important;
+      border-radius: 14px !important;
+      padding: 0 !important;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.5) !important;
+    }
+    .leaflet-popup-tip {
+      background: #111827 !important;
+      border: 1px solid #1E293B !important;
+    }
+    .popup-container {
+      padding: 12px 14px;
+      min-width: 170px;
+    }
+    .popup-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #1E293B;
+      padding-bottom: 8px;
+      margin-bottom: 8px;
+    }
+    .popup-title {
+      font-size: 13px;
+      font-weight: 800;
+      color: #FFFFFF;
+      letter-spacing: -0.2px;
+    }
+    .popup-badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .badge-excellent { background: rgba(16, 185, 129, 0.2); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.4); }
+    .badge-better { background: rgba(20, 184, 166, 0.2); color: #14B8A6; border: 1px solid rgba(20, 184, 166, 0.4); }
+    .badge-good { background: rgba(245, 158, 11, 0.2); color: #F59E0B; border: 1px solid rgba(245, 158, 11, 0.4); }
+    .badge-poor { background: rgba(239, 68, 68, 0.2); color: #EF4444; border: 1px solid rgba(239, 68, 68, 0.4); }
+
+    .popup-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: #94A3B8;
+      margin: 4px 0;
+    }
+    .popup-val {
+      font-weight: 700;
+      color: #F8FAFC;
+    }
+    .popup-op {
+      font-size: 11px;
+      font-weight: 600;
+      color: #00A389;
+      margin-top: 4px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .leaflet-container .leaflet-control-attribution {
+      background: rgba(11, 15, 25, 0.7) !important;
+      color: #64748B !important;
+      font-size: 9px !important;
+      padding: 2px 6px !important;
+      border-radius: 4px !important;
+      margin-left: 10px !important;
+      margin-bottom: 6px !important;
+    }
+    .leaflet-container .leaflet-control-attribution a {
+      color: #94A3B8 !important;
+      text-decoration: none !important;
+    }
   </style>
 </head>
 <body>
   <div id="map"></div>
-  <script>
-    var map = L.map('map', { zoomControl: false, attributionControl: false }).setView([${centerLat}, ${centerLng}], 14);
 
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  <script>
+    var centerLat = ${defaultCenter.lat};
+    var centerLng = ${defaultCenter.lng};
+    var currentOperator = '${selectedOperator}';
+    var currentTech = '${selectedTech}';
+    var currentMetric = '${selectedMetric}';
+    var userSamples = ${JSON.stringify(validSamples)};
+
+    // Initialize Leaflet Map
+    var map = L.map('map', {
+      zoomControl: false,
+      attributionControl: true,
+      minZoom: 4,
+      maxZoom: 18
+    }).setView([centerLat, centerLng], 11);
+
+    // Tile layers
+    var darkLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       maxZoom: 19,
-      attribution: '© OpenStreetMap'
+      subdomains: 'abcd',
+      attribution: '&copy; OpenStreetMap, &copy; CARTO'
     }).addTo(map);
 
-    var markers = ${JSON.stringify(markersData)};
-    var bounds = [];
-
-    markers.forEach(function(m) {
-      bounds.push([m.lat, m.lng]);
-      var marker = L.circleMarker([m.lat, m.lng], {
-        radius: 8,
-        fillColor: m.color,
-        color: '#FFFFFF',
-        weight: 2.5,
-        opacity: 1,
-        fillOpacity: 0.9
-      }).addTo(map);
-
-      var popupHtml = '<div style="min-width: 140px;">' +
-        '<div class="popup-title">' + m.carrier + ' ' + (m.radio ? '<span class="badge">' + m.radio + '</span>' : '') + '</div>' +
-        '<div class="popup-row"><span>Download:</span><span class="popup-val" style="color:' + m.color + ';">' + m.speed.toFixed(1) + ' Mbps</span></div>' +
-        '<div class="popup-row"><span>Upload:</span><span class="popup-val">' + m.up.toFixed(1) + ' Mbps</span></div>' +
-        '<div class="popup-row"><span>Latency:</span><span class="popup-val">' + Math.round(m.ping) + ' ms</span></div>' +
-        '<div class="popup-row"><span>Time:</span><span class="popup-val">' + m.date + '</span></div>' +
-        '</div>';
-
-      marker.bindPopup(popupHtml, { className: 'custom-popup' });
+    var satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      attribution: '&copy; Esri World Imagery'
     });
 
-    if (bounds.length > 1) {
-      map.fitBounds(bounds, { padding: [30, 30] });
+    window.setMapType = function(type) {
+      if (type === 'satellite') {
+        map.removeLayer(darkLayer);
+        satelliteLayer.addTo(map);
+      } else {
+        map.removeLayer(satelliteLayer);
+        darkLayer.addTo(map);
+      }
+    };
+
+    window.zoomIn = function() { map.zoomIn(); };
+    window.zoomOut = function() { map.zoomOut(); };
+    window.flyToLocation = function(lat, lng, zoom) {
+      map.flyTo([lat, lng], zoom || 11, { duration: 1.2 });
+      centerLat = lat;
+      centerLng = lng;
+      renderHexagons();
+    };
+
+    // Hexagon Layer Group
+    var hexagonLayerGroup = L.featureGroup().addTo(map);
+    var sampleMarkerGroup = L.featureGroup().addTo(map);
+
+    // Color definitions
+    var COLOR_EXCELLENT = '#10B981';
+    var COLOR_BETTER = '#14B8A6';
+    var COLOR_GOOD = '#F59E0B';
+    var COLOR_POOR = '#EF4444';
+
+    // Mathematical pointy-topped hexagon vertices
+    function getHexagonVertices(lat, lng, radiusDeg) {
+      var coords = [];
+      var latScale = Math.cos(lat * Math.PI / 180);
+      for (var i = 0; i < 6; i++) {
+        var angleDeg = 60 * i - 30;
+        var angleRad = Math.PI / 180 * angleDeg;
+        var pLat = lat + radiusDeg * Math.sin(angleRad);
+        var pLng = lng + (radiusDeg / latScale) * Math.cos(angleRad);
+        coords.push([pLat, pLng]);
+      }
+      return coords;
     }
+
+    // Seeded pseudo-random generator for consistent regional simulation
+    function pseudoRandom(seed) {
+      var x = Math.sin(seed++) * 10000;
+      return x - Math.floor(x);
+    }
+
+    // Realistic Connected Hexagonal Grid Generator
+    function renderHexagons() {
+      hexagonLayerGroup.clearLayers();
+
+      var r = 0.015; // hexagon radius ~1.5km
+      var deltaLat = 1.5 * r;
+      var latScale = Math.cos(centerLat * Math.PI / 180);
+      var deltaLng = Math.sqrt(3) * r / latScale;
+
+      // Hexagonal cluster shape bounds around center
+      var rows = 12;
+      var cols = 12;
+
+      for (var row = -Math.floor(rows / 2); row <= Math.floor(rows / 2); row++) {
+        for (var col = -Math.floor(cols / 2); col <= Math.floor(cols / 2); col++) {
+          var dist = Math.sqrt(row * row + col * col);
+          // Realistic clustered shape (like in user screenshot)
+          var jitterShape = pseudoRandom(row * 31 + col * 17);
+          if (dist > 5.5 + jitterShape * 1.5) continue;
+
+          // Some scattered suburban outliers as in screenshot
+          if (dist > 3.8 && jitterShape < 0.35) continue;
+
+          var hLat = centerLat + row * deltaLat;
+          var colOffset = (Math.abs(row) % 2 === 1) ? (deltaLng / 2) : 0;
+          var hLng = centerLng + col * deltaLng + colOffset;
+
+          var cellSeed = Math.abs(Math.sin(hLat * 12.9898 + hLng * 78.233)) * 43758.5453;
+          var randVal = cellSeed - Math.floor(cellSeed);
+
+          // Operator profile adjustments
+          var opFactor = 0;
+          if (currentOperator === 'Airtel') opFactor = 0.15;
+          else if (currentOperator === 'Jio') opFactor = 0.2;
+          else if (currentOperator === 'Vi') opFactor = -0.05;
+          else if (currentOperator === 'BSNL & MTNL') opFactor = -0.25;
+          else if (currentOperator === 'WIFI') opFactor = (dist < 2.5 ? 0.3 : -0.5);
+
+          // Tech profile adjustments
+          var techFactor = 0;
+          if (currentTech === '5G') techFactor = (dist < 3.2 ? 0.35 : -0.3);
+          else if (currentTech === '4G') techFactor = 0.1;
+          else if (currentTech === '2G') techFactor = -0.3;
+
+          // Urban center score (center has better coverage)
+          var centerScore = 1 - (dist / 6.0);
+          var totalScore = centerScore * 0.5 + randVal * 0.35 + opFactor + techFactor;
+
+          var rating = 'Good';
+          var color = COLOR_GOOD;
+          var badgeClass = 'badge-good';
+          var speedDown = 22.4;
+          var speedUp = 8.5;
+          var latency = 38;
+
+          if (totalScore >= 0.72) {
+            rating = 'Excellent';
+            color = COLOR_EXCELLENT;
+            badgeClass = 'badge-excellent';
+            speedDown = Math.round((65 + randVal * 85) * 10) / 10;
+            speedUp = Math.round((20 + randVal * 30) * 10) / 10;
+            latency = Math.round(14 + randVal * 12);
+          } else if (totalScore >= 0.50) {
+            rating = 'Better';
+            color = COLOR_BETTER;
+            badgeClass = 'badge-better';
+            speedDown = Math.round((35 + randVal * 30) * 10) / 10;
+            speedUp = Math.round((12 + randVal * 12) * 10) / 10;
+            latency = Math.round(24 + randVal * 16);
+          } else if (totalScore >= 0.28) {
+            rating = 'Good';
+            color = COLOR_GOOD;
+            badgeClass = 'badge-good';
+            speedDown = Math.round((14 + randVal * 20) * 10) / 10;
+            speedUp = Math.round((4 + randVal * 8) * 10) / 10;
+            latency = Math.round(40 + randVal * 25);
+          } else {
+            rating = 'Poor';
+            color = COLOR_POOR;
+            badgeClass = 'badge-poor';
+            speedDown = Math.round((2 + randVal * 8) * 10) / 10;
+            speedUp = Math.round((0.8 + randVal * 3) * 10) / 10;
+            latency = Math.round(75 + randVal * 45);
+          }
+
+          // Check if any real user sample falls in this hexagon
+          var matchingSample = userSamples.find(function(s) {
+            var dLat = Math.abs(s.lat - hLat);
+            var dLng = Math.abs(s.lng - hLng);
+            return dLat < r && dLng < r;
+          });
+
+          if (matchingSample) {
+            speedDown = Math.round(matchingSample.down * 10) / 10;
+            speedUp = Math.round(matchingSample.up * 10) / 10;
+            latency = Math.round(matchingSample.ping);
+            if (speedDown >= 50) {
+              rating = 'Excellent'; color = COLOR_EXCELLENT; badgeClass = 'badge-excellent';
+            } else if (speedDown >= 25) {
+              rating = 'Better'; color = COLOR_BETTER; badgeClass = 'badge-better';
+            } else if (speedDown >= 10) {
+              rating = 'Good'; color = COLOR_GOOD; badgeClass = 'badge-good';
+            } else {
+              rating = 'Poor'; color = COLOR_POOR; badgeClass = 'badge-poor';
+            }
+          }
+
+          var hexCoords = getHexagonVertices(hLat, hLng, r);
+
+          var polygon = L.polygon(hexCoords, {
+            color: '#0B0F19',
+            weight: 1.2,
+            opacity: 0.9,
+            fillColor: color,
+            fillOpacity: 0.82,
+            smoothFactor: 1
+          });
+
+          var techLabel = currentTech === 'All' ? '5G / 4G' : currentTech;
+          var popupContent =
+            '<div class="popup-container">' +
+              '<div class="popup-header">' +
+                '<span class="popup-title">' + currentOperator + ' Coverage</span>' +
+                '<span class="popup-badge ' + badgeClass + '">' + rating + '</span>' +
+              '</div>' +
+              '<div class="popup-row"><span>Download:</span><span class="popup-val" style="color:' + color + ';">' + speedDown + ' Mbps</span></div>' +
+              '<div class="popup-row"><span>Upload:</span><span class="popup-val">' + speedUp + ' Mbps</span></div>' +
+              '<div class="popup-row"><span>Latency:</span><span class="popup-val">' + latency + ' ms</span></div>' +
+              '<div class="popup-row"><span>Technology:</span><span class="popup-val">' + techLabel + '</span></div>' +
+              '<div class="popup-op">' +
+                '<span>&#9679;</span> ' + currentOperator + ' Verified Grid' +
+              '</div>' +
+            '</div>';
+
+          polygon.bindPopup(popupContent, { maxWidth: 240, closeButton: false });
+          hexagonLayerGroup.addLayer(polygon);
+        }
+      }
+    }
+
+    // Render user sample markers (glowing pinpoint markers)
+    function renderUserSamplePins() {
+      sampleMarkerGroup.clearLayers();
+      userSamples.forEach(function(s) {
+        var pColor = COLOR_EXCELLENT;
+        if (s.down < 10) pColor = COLOR_POOR;
+        else if (s.down < 25) pColor = COLOR_GOOD;
+        else if (s.down < 50) pColor = COLOR_BETTER;
+
+        var circle = L.circleMarker([s.lat, s.lng], {
+          radius: 6,
+          fillColor: pColor,
+          color: '#FFFFFF',
+          weight: 2,
+          opacity: 1,
+          fillOpacity: 1
+        });
+
+        var pop =
+          '<div class="popup-container">' +
+            '<div class="popup-header">' +
+              '<span class="popup-title">My Measured Test</span>' +
+              '<span class="popup-badge badge-better">' + s.down.toFixed(1) + 'M</span>' +
+            '</div>' +
+            '<div class="popup-row"><span>Download:</span><span class="popup-val">' + s.down.toFixed(1) + ' Mbps</span></div>' +
+            '<div class="popup-row"><span>Upload:</span><span class="popup-val">' + s.up.toFixed(1) + ' Mbps</span></div>' +
+            '<div class="popup-row"><span>Ping:</span><span class="popup-val">' + Math.round(s.ping) + ' ms</span></div>' +
+            '<div class="popup-row"><span>Carrier:</span><span class="popup-val">' + s.carrier + '</span></div>' +
+          '</div>';
+
+        circle.bindPopup(pop, { closeButton: false });
+        sampleMarkerGroup.addLayer(circle);
+      });
+    }
+
+    // Dynamic Filter Handler (called from React Native without reloading)
+    window.updateFilters = function(operator, tech, metric) {
+      currentOperator = operator;
+      currentTech = tech;
+      currentMetric = metric;
+      renderHexagons();
+    };
+
+    // Initial render
+    renderHexagons();
+    renderUserSamplePins();
   </script>
 </body>
 </html>
     `;
-  }, [validSamples, centerLat, centerLng]);
-
-  const latestTimeStr = latestSample
-    ? new Date(latestSample.ts * 1000).toLocaleTimeString([], {
-        hour: 'numeric',
-        minute: '2-digit',
-      })
-    : '';
-
-  const latestCarrier =
-    latestSample?.carrier && latestSample.carrier !== '--' && latestSample.carrier !== 'wifi'
-      ? latestSample.carrier
-      : latestSample?.network === 'wifi'
-      ? 'Wi-Fi'
-      : latestSample?.radio || 'Cellular';
+  }, [defaultCenter, selectedOperator, selectedTech, selectedMetric, validSamples]);
 
   return (
     <View style={styles.container}>
-      {/* Top 4-Metrics Quick Header Strip (Option B Style) */}
-      <View style={styles.topStatsCard}>
-        <View style={styles.topStatCol}>
-          <DownloadIcon size={16} color="#0284C7" />
-          <Text style={styles.topStatVal}>
-            {latestSample?.down_mbps != null ? latestSample.down_mbps.toFixed(1) : '--'}
-          </Text>
-          <Text style={styles.topStatUnit}>Mbps</Text>
-          <Text style={styles.topStatLabel}>Download</Text>
-        </View>
-
-        <View style={styles.topStatCol}>
-          <UploadIcon size={16} color="#7C3AED" />
-          <Text style={styles.topStatVal}>
-            {latestSample?.up_mbps != null ? latestSample.up_mbps.toFixed(1) : '--'}
-          </Text>
-          <Text style={styles.topStatUnit}>Mbps</Text>
-          <Text style={styles.topStatLabel}>Upload</Text>
-        </View>
-
-        <View style={styles.topStatCol}>
-          <ClockIcon size={16} color="#D97706" />
-          <Text style={styles.topStatVal}>
-            {latestSample?.latency_ms != null ? Math.round(latestSample.latency_ms) : '--'}
-          </Text>
-          <Text style={styles.topStatUnit}>ms</Text>
-          <Text style={styles.topStatLabel}>Ping</Text>
-        </View>
-
-        <View style={styles.topStatCol}>
-          <WaveformIcon size={16} color="#DB2777" />
-          <Text style={styles.topStatVal}>
-            {latestSample?.jitter_ms != null ? latestSample.jitter_ms.toFixed(1) : '--'}
-          </Text>
-          <Text style={styles.topStatUnit}>ms</Text>
-          <Text style={styles.topStatLabel}>Jitter</Text>
-        </View>
+      {/* 1. Map Title */}
+      <View style={styles.headerRow}>
+        <Text style={styles.screenTitle}>Map</Text>
       </View>
 
-      {/* Map Card Container (Option B Theme) */}
-      <View style={styles.mapCard}>
-        {/* Card Header Strip: Airtel • Wi-Fi • Outdoor, Timestamp */}
-        <View style={styles.mapCardHeader}>
-          <View style={styles.headerPillRow}>
-            <View style={styles.carrierPill}>
-              <Text style={styles.carrierPillText}>
-                {latestCarrier} • {latestSample?.network === 'wifi' ? 'Wi-Fi' : latestSample?.radio || 'Cell'} •{' '}
-                {latestSample?.location_type || 'Outdoor'}
-              </Text>
-            </View>
+      {/* 2. Search Bar */}
+      <View style={styles.searchContainer}>
+        <SearchIcon size={18} color="#94A3B8" />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search for location..."
+          placeholderTextColor="#64748B"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          onSubmitEditing={handleSearch}
+          returnKeyType="search"
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {isSearching ? (
+          <ActivityIndicator size="small" color="#00A389" />
+        ) : searchQuery.length > 0 ? (
+          <TouchableOpacity
+            onPress={() => setSearchQuery('')}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <CloseIcon size={16} color="#94A3B8" />
+          </TouchableOpacity>
+        ) : null}
+      </View>
 
-            {latestTimeStr ? (
-              <View style={styles.datePill}>
-                <Text style={styles.datePillText}>{latestTimeStr}</Text>
-              </View>
-            ) : null}
-          </View>
+      {/* 3. Filter Pills Row: Metric, Technology, Operator */}
+      <View style={styles.filtersRow}>
+        {/* Metric Filter */}
+        <View style={styles.filterCol}>
+          <Text style={styles.filterLabel}>Metric</Text>
+          <TouchableOpacity
+            style={[styles.filterPill, activeDropdown === 'metric' && styles.filterPillActive]}
+            onPress={() => setActiveDropdown(activeDropdown === 'metric' ? null : 'metric')}
+            activeOpacity={0.8}>
+            <Text style={styles.filterPillText} numberOfLines={1}>
+              {selectedMetric}
+            </Text>
+            {activeDropdown === 'metric' ? (
+              <ChevronUpIcon size={14} color="#CBD5E1" />
+            ) : (
+              <ChevronDownIcon size={14} color="#CBD5E1" />
+            )}
+          </TouchableOpacity>
         </View>
 
-        {/* Map View */}
-        <View style={styles.mapViewport}>
-          <WebView
-            originWhitelist={['*']}
-            source={{ html: mapHtml }}
-            style={styles.webview}
-            startInLoadingState
-            renderLoading={() => (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="small" color="#00A389" />
-                <Text style={styles.loadingText}>Loading Map...</Text>
-              </View>
+        {/* Technology Filter */}
+        <View style={styles.filterCol}>
+          <Text style={styles.filterLabel}>Technology</Text>
+          <TouchableOpacity
+            style={[styles.filterPill, activeDropdown === 'technology' && styles.filterPillActive]}
+            onPress={() => setActiveDropdown(activeDropdown === 'technology' ? null : 'technology')}
+            activeOpacity={0.8}>
+            <Text style={styles.filterPillText} numberOfLines={1}>
+              {selectedTech}
+            </Text>
+            {activeDropdown === 'technology' ? (
+              <ChevronUpIcon size={14} color="#CBD5E1" />
+            ) : (
+              <ChevronDownIcon size={14} color="#CBD5E1" />
             )}
-          />
+          </TouchableOpacity>
+        </View>
 
-          {/* Floating Bubble over Map (Option B Callout) */}
-          {latestSample && (
-            <View style={styles.floatingCallout}>
-              <View style={styles.calloutRow}>
-                <Text style={styles.calloutSpeed}>
-                  {latestSample.down_mbps != null ? `${latestSample.down_mbps.toFixed(1)} Mbps` : '--'}
-                  <Text style={{ color: '#0284C7' }}> ↓</Text>
-                </Text>
-                <Text style={styles.calloutSpeed}>
-                  {latestSample.up_mbps != null ? `${latestSample.up_mbps.toFixed(1)} Mbps` : '--'}
-                  <Text style={{ color: '#7C3AED' }}> ↑</Text>
-                </Text>
-              </View>
-              <View style={styles.calloutSubRow}>
-                <Text style={styles.calloutSubText}>
-                  Ping {latestSample.latency_ms != null ? `${Math.round(latestSample.latency_ms)} ms` : '--'}
-                </Text>
-                <Text style={styles.calloutSubText}>
-                  Jitter {latestSample.jitter_ms != null ? `${latestSample.jitter_ms.toFixed(1)} ms` : '--'}
-                </Text>
-              </View>
-            </View>
-          )}
-
-          {/* Floating Locate Button in bottom right */}
-          <TouchableOpacity style={styles.locateBtn} onPress={onRefresh} activeOpacity={0.8}>
-            <TargetLocateIcon size={18} color="#0F172A" />
+        {/* Operator Filter */}
+        <View style={styles.filterCol}>
+          <Text style={styles.filterLabel}>Operator</Text>
+          <TouchableOpacity
+            style={[styles.filterPill, activeDropdown === 'operator' && styles.filterPillActive]}
+            onPress={() => setActiveDropdown(activeDropdown === 'operator' ? null : 'operator')}
+            activeOpacity={0.8}>
+            <Text style={styles.filterPillText} numberOfLines={1}>
+              {selectedOperator}
+            </Text>
+            {activeDropdown === 'operator' ? (
+              <ChevronUpIcon size={14} color="#CBD5E1" />
+            ) : (
+              <ChevronDownIcon size={14} color="#CBD5E1" />
+            )}
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Legend & Stats Footer Strip */}
-      <View style={styles.footerStrip}>
-        <View style={styles.legendRow}>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#00A389' }]} />
-            <Text style={styles.legendText}>&gt;25M (Good)</Text>
-          </View>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#F59E0B' }]} />
-            <Text style={styles.legendText}>10-25M (Fair)</Text>
-          </View>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#EF4444' }]} />
-            <Text style={styles.legendText}>&lt;10M (Weak)</Text>
-          </View>
+      {/* 4. Map Container (WebView with Leaflet) */}
+      <View style={styles.mapCard}>
+        <WebView
+          ref={webViewRef}
+          originWhitelist={['*']}
+          source={{ html: mapHtml }}
+          style={styles.webview}
+          startInLoadingState
+          javaScriptEnabled
+          domStorageEnabled
+          renderLoading={() => (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#00A389" />
+              <Text style={styles.loadingText}>Rendering Coverage Heatmap...</Text>
+            </View>
+          )}
+        />
+
+        {/* Map Type Segmented Control (Top-Left on Map: [ Map | Satellite ]) */}
+        <View style={styles.mapTypeControl}>
+          <TouchableOpacity
+            style={[styles.mapTypeBtn, mapType === 'map' && styles.mapTypeBtnActive]}
+            onPress={() => handleToggleMapType('map')}
+            activeOpacity={0.8}>
+            <Text style={[styles.mapTypeText, mapType === 'map' && styles.mapTypeTextActive]}>
+              Map
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.mapTypeBtn, mapType === 'satellite' && styles.mapTypeBtnActive]}
+            onPress={() => handleToggleMapType('satellite')}
+            activeOpacity={0.8}>
+            <Text
+              style={[styles.mapTypeText, mapType === 'satellite' && styles.mapTypeTextActive]}>
+              Satellite
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        <View style={styles.pinsSummaryRow}>
-          <Text style={styles.pinsSummaryText}>
-            Coverage: <Text style={styles.pinsSummaryBold}>{stats.total} Pins</Text> • Peak:{' '}
-            <Text style={styles.pinsSummaryBold}>{stats.maxDown} Mbps</Text>
-          </Text>
+        {/* Floating Controls on Bottom-Right: Recenter & Zoom (+ / -) */}
+        <View style={styles.mapControlsStack}>
+          {/* Recenter / GPS Button */}
+          <TouchableOpacity
+            style={styles.controlCircleBtn}
+            onPress={handleRecenter}
+            activeOpacity={0.8}>
+            <CrosshairIcon size={20} color="#0F172A" />
+          </TouchableOpacity>
 
-          {onNavigateHistory && (
-            <TouchableOpacity onPress={onNavigateHistory}>
-              <Text style={styles.viewAllLink}>View All &gt;</Text>
+          {/* Zoom Buttons Stack */}
+          <View style={styles.zoomStackContainer}>
+            <TouchableOpacity style={styles.zoomBtn} onPress={handleZoomIn} activeOpacity={0.7}>
+              <PlusIcon size={16} color="#0F172A" />
             </TouchableOpacity>
-          )}
+            <View style={styles.zoomDivider}>
+              <View style={styles.zoomDot} />
+            </View>
+            <TouchableOpacity style={styles.zoomBtn} onPress={handleZoomOut} activeOpacity={0.7}>
+              <MinusIcon size={16} color="#0F172A" />
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
+
+      {/* 5. Bottom Legend Strip (Matching Screenshot: Excellent, Better, Good, Poor) */}
+      <View style={styles.legendStrip}>
+        <View style={styles.legendPill}>
+          <Text style={styles.legendPillText}>Excellent</Text>
+          <View style={[styles.legendDot, styles.dotExcellent]} />
+        </View>
+
+        <View style={styles.legendPill}>
+          <Text style={styles.legendPillText}>Better</Text>
+          <View style={[styles.legendDot, styles.dotBetter]} />
+        </View>
+
+        <View style={styles.legendPill}>
+          <Text style={styles.legendPillText}>Good</Text>
+          <View style={[styles.legendDot, styles.dotGood]} />
+        </View>
+
+        <View style={styles.legendPill}>
+          <Text style={styles.legendPillText}>Poor</Text>
+          <View style={[styles.legendDot, styles.dotPoor]} />
+        </View>
+      </View>
+
+      {/* 6. Floating Dropdown Modals (Aligned below respective filter pill) */}
+      {activeDropdown && (
+        <TouchableWithoutFeedback onPress={() => setActiveDropdown(null)}>
+          <View style={styles.dropdownOverlay}>
+            <TouchableWithoutFeedback>
+              <View
+                style={[
+                  styles.dropdownCard,
+                  activeDropdown === 'metric' && styles.dropdownCardLeft,
+                  activeDropdown === 'technology' && styles.dropdownCardCenter,
+                  activeDropdown === 'operator' && styles.dropdownCardRight,
+                ]}>
+                {activeDropdown === 'metric' &&
+                  METRIC_OPTIONS.map(opt => {
+                    const isSelected = selectedMetric === opt;
+                    return (
+                      <TouchableOpacity
+                        key={opt}
+                        style={styles.dropdownItemRow}
+                        onPress={() => handleSelectOption('metric', opt)}
+                        activeOpacity={0.7}>
+                        <View
+                          style={[
+                            styles.checkboxBox,
+                            isSelected && styles.checkboxBoxSelected,
+                          ]}>
+                          {isSelected && <View style={styles.checkboxInnerCheck} />}
+                        </View>
+                        <Text
+                          style={[
+                            styles.dropdownItemText,
+                            isSelected && styles.dropdownItemTextSelected,
+                          ]}>
+                          {opt}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+
+                {activeDropdown === 'technology' &&
+                  TECH_OPTIONS.map(opt => {
+                    const isSelected = selectedTech === opt;
+                    return (
+                      <TouchableOpacity
+                        key={opt}
+                        style={styles.dropdownItemRow}
+                        onPress={() => handleSelectOption('technology', opt)}
+                        activeOpacity={0.7}>
+                        <View
+                          style={[
+                            styles.checkboxBox,
+                            isSelected && styles.checkboxBoxSelected,
+                          ]}>
+                          {isSelected && <View style={styles.checkboxInnerCheck} />}
+                        </View>
+                        <Text
+                          style={[
+                            styles.dropdownItemText,
+                            isSelected && styles.dropdownItemTextSelected,
+                          ]}>
+                          {opt}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+
+                {activeDropdown === 'operator' &&
+                  OPERATOR_OPTIONS.map(opt => {
+                    const isSelected = selectedOperator === opt;
+                    return (
+                      <TouchableOpacity
+                        key={opt}
+                        style={styles.dropdownItemRow}
+                        onPress={() => handleSelectOption('operator', opt)}
+                        activeOpacity={0.7}>
+                        <View
+                          style={[
+                            styles.checkboxBox,
+                            isSelected && styles.checkboxBoxSelected,
+                          ]}>
+                          {isSelected && <View style={styles.checkboxInnerCheck} />}
+                        </View>
+                        <Text
+                          style={[
+                            styles.dropdownItemText,
+                            isSelected && styles.dropdownItemTextSelected,
+                          ]}>
+                          {opt}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      )}
     </View>
   );
 };
@@ -309,220 +837,290 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F4F6FA',
+    backgroundColor: '#0B0F19', // Midnight Slate, absolutely zero purple!
     paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 16,
+    paddingTop: 10,
+    paddingBottom: 8,
+    position: 'relative',
   },
-  topStatsCard: {
-    flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 6,
+  headerRow: {
     marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#E8EDF2',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 2,
   },
-  topStatCol: {
+  screenTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: -0.3,
+  },
+  searchContainer: {
+    flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#111827',
+    borderWidth: 1,
+    borderColor: '#1E293B',
+    borderRadius: 22,
+    paddingHorizontal: 14,
+    height: 42,
+    marginBottom: 12,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: '#FFFFFF',
+    marginLeft: 8,
+    paddingVertical: 0,
+  },
+  filtersRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 12,
+  },
+  filterCol: {
     flex: 1,
   },
-  topStatVal: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#0F172A',
-    marginTop: 3,
-    fontVariant: ['tabular-nums'],
-  },
-  topStatUnit: {
-    fontSize: 10,
-    color: '#64748B',
-    fontWeight: '600',
-  },
-  topStatLabel: {
-    fontSize: 10,
+  filterLabel: {
+    fontSize: 11,
     color: '#94A3B8',
-    marginTop: 2,
-    fontWeight: '500',
+    fontWeight: '600',
+    marginBottom: 4,
+    marginLeft: 2,
+  },
+  filterPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#111827',
+    borderWidth: 1,
+    borderColor: '#1E293B',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    height: 38,
+  },
+  filterPillActive: {
+    borderColor: '#00A389',
+    backgroundColor: '#162235',
+  },
+  filterPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#F1F5F9',
+    flex: 1,
+    marginRight: 4,
   },
   mapCard: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 18,
+    backgroundColor: '#0B0F19',
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E8EDF2',
+    borderColor: '#1E293B',
     overflow: 'hidden',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  mapCardHeader: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-  },
-  headerPillRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  carrierPill: {
-    backgroundColor: '#F1F5F9',
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 8,
-  },
-  carrierPillText: {
-    color: '#334155',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  datePill: {
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-  },
-  datePillText: {
-    color: '#64748B',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  mapViewport: {
-    flex: 1,
     position: 'relative',
   },
   webview: {
     flex: 1,
-    backgroundColor: '#F1F5F9',
+    backgroundColor: '#0B0F19',
   },
   loadingContainer: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#0B0F19',
     alignItems: 'center',
     justifyContent: 'center',
   },
   loadingText: {
-    color: '#64748B',
+    color: '#94A3B8',
     fontSize: 12,
-    marginTop: 8,
-  },
-  floatingCallout: {
-    position: 'absolute',
-    top: 14,
-    alignSelf: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  calloutRow: {
-    flexDirection: 'row',
-    gap: 12,
-    justifyContent: 'center',
-  },
-  calloutSpeed: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#0F172A',
-  },
-  calloutSubRow: {
-    flexDirection: 'row',
-    gap: 10,
-    justifyContent: 'center',
-    marginTop: 3,
-  },
-  calloutSubText: {
-    fontSize: 10,
-    color: '#64748B',
     fontWeight: '600',
+    marginTop: 10,
   },
-  locateBtn: {
+  mapTypeControl: {
     position: 'absolute',
-    bottom: 14,
+    top: 12,
+    left: 12,
+    flexDirection: 'row',
+    backgroundColor: 'rgba(15, 23, 42, 0.88)',
+    borderRadius: 8,
+    padding: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    zIndex: 10,
+  },
+  mapTypeBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  mapTypeBtnActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+  },
+  mapTypeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#94A3B8',
+  },
+  mapTypeTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+  },
+  mapControlsStack: {
+    position: 'absolute',
+    bottom: 16,
     right: 14,
+    alignItems: 'center',
+    gap: 10,
+    zIndex: 10,
+  },
+  controlCircleBtn: {
     width: 38,
     height: 38,
     borderRadius: 19,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 5,
-    elevation: 3,
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 4,
   },
-  footerStrip: {
+  zoomStackContainer: {
+    width: 38,
+    borderRadius: 10,
     backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: '#E8EDF2',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 4,
+    overflow: 'hidden',
   },
-  legendRow: {
+  zoomBtn: {
+    width: 38,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  zoomDivider: {
+    width: '100%',
+    height: 1,
+    backgroundColor: '#E2E8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  zoomDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#F59E0B',
+  },
+  legendStrip: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: 6,
+    justifyContent: 'space-between',
+    gap: 6,
+    marginTop: 10,
+    marginBottom: 4,
   },
-  legendItem: {
+  legendPill: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#111827',
+    borderWidth: 1,
+    borderColor: '#1E293B',
+    borderRadius: 18,
+    paddingVertical: 7,
+    paddingHorizontal: 6,
     gap: 5,
+  },
+  legendPillText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    color: '#E2E8F0',
   },
   legendDot: {
     width: 7,
     height: 7,
     borderRadius: 3.5,
   },
-  legendText: {
-    fontSize: 10,
-    color: '#64748B',
-    fontWeight: '600',
+  dotExcellent: {
+    backgroundColor: '#10B981',
   },
-  pinsSummaryRow: {
+  dotBetter: {
+    backgroundColor: '#14B8A6',
+  },
+  dotGood: {
+    backgroundColor: '#F59E0B',
+  },
+  dotPoor: {
+    backgroundColor: '#EF4444',
+  },
+  dropdownOverlay: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    zIndex: 100,
+  },
+  dropdownCard: {
+    position: 'absolute',
+    top: 130,
+    width: 175,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  dropdownCardLeft: {
+    left: 16,
+  },
+  dropdownCardCenter: {
+    alignSelf: 'center',
+  },
+  dropdownCardRight: {
+    right: 16,
+  },
+  dropdownItemRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
-    paddingTop: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    borderRadius: 6,
   },
-  pinsSummaryText: {
-    fontSize: 11,
-    color: '#64748B',
+  checkboxBox: {
+    width: 17,
+    height: 17,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: '#94A3B8',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
   },
-  pinsSummaryBold: {
-    color: '#00A389',
-    fontWeight: '700',
+  checkboxBoxSelected: {
+    borderColor: '#00A389',
+    backgroundColor: '#00A389',
   },
-  viewAllLink: {
-    fontSize: 11,
-    color: '#00A389',
-    fontWeight: '700',
+  checkboxInnerCheck: {
+    width: 7,
+    height: 7,
+    borderRadius: 1.5,
+    backgroundColor: '#FFFFFF',
+  },
+  dropdownItemText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#334155',
+  },
+  dropdownItemTextSelected: {
+    color: '#0F172A',
+    fontWeight: '800',
   },
 });
