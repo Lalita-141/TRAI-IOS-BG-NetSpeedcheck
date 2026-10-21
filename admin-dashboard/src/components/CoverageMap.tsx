@@ -7,11 +7,20 @@ interface CoverageMapProps {
   onPointSelect?: (point: MapPoint) => void;
 }
 
+// Clean Esri Dark Canvas (100% Free, No API Key, No Watermark, Native Dark Mode)
+const DARK_MAP_TILE =
+  'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}';
+
+// Clean Esri High-Resolution World Imagery
+const SATELLITE_TILE =
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+
 export const CoverageMap: React.FC<CoverageMapProps> = ({ onPointSelect }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const leafletInstance = useRef<L.Map | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
+  const isInitialLoad = useRef<boolean>(true);
 
   const [activeLayer, setActiveLayer] = useState<'map' | 'satellite'>('map');
   const [metric, setMetric] = useState<string>('Coverage');
@@ -28,18 +37,15 @@ export const CoverageMap: React.FC<CoverageMapProps> = ({ onPointSelect }) => {
 
     const map = L.map(mapRef.current, {
       zoomControl: false,
-    }).setView([20.5937, 78.9629], 5); // India Center
+    }).setView([28.6139, 77.2090], 10); // Center on Delhi NCR
 
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-    // Free OpenStreetMap / Carto Dark without API key watermarks
-    const defaultTile = L.tileLayer(
-      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-      {
-        attribution: '&copy; OpenStreetMap, &copy; CARTO',
-        maxZoom: 19,
-      }
-    ).addTo(map);
+    // Add Dark Canvas Tile
+    const defaultTile = L.tileLayer(DARK_MAP_TILE, {
+      attribution: '&copy; Esri, OpenStreetMap',
+      maxZoom: 16,
+    }).addTo(map);
 
     tileLayerRef.current = defaultTile;
     markersLayerRef.current = L.layerGroup().addTo(map);
@@ -51,7 +57,7 @@ export const CoverageMap: React.FC<CoverageMapProps> = ({ onPointSelect }) => {
     };
   }, []);
 
-  // Handle Layer Toggle (Street Map vs Satellite)
+  // Handle Layer Toggle (Dark Map vs Satellite)
   const toggleMapLayer = (type: 'map' | 'satellite') => {
     if (!leafletInstance.current || activeLayer === type) return;
 
@@ -59,12 +65,13 @@ export const CoverageMap: React.FC<CoverageMapProps> = ({ onPointSelect }) => {
       leafletInstance.current.removeLayer(tileLayerRef.current);
     }
 
-    const tileUrl =
-      type === 'satellite'
-        ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-        : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+    const tileUrl = type === 'satellite' ? SATELLITE_TILE : DARK_MAP_TILE;
 
-    tileLayerRef.current = L.tileLayer(tileUrl, { maxZoom: 19 }).addTo(leafletInstance.current);
+    tileLayerRef.current = L.tileLayer(tileUrl, {
+      attribution: '&copy; Esri',
+      maxZoom: 18,
+    }).addTo(leafletInstance.current);
+
     setActiveLayer(type);
   };
 
@@ -85,37 +92,49 @@ export const CoverageMap: React.FC<CoverageMapProps> = ({ onPointSelect }) => {
 
       if (markersLayerRef.current && leafletInstance.current) {
         markersLayerRef.current.clearLayers();
+        const markerList: L.CircleMarker[] = [];
 
         data.forEach(p => {
           if (p.lat && p.lng) {
             const marker = L.circleMarker([p.lat, p.lng], {
-              radius: 9,
+              radius: 10,
               fillColor: p.color,
               color: '#FFFFFF',
-              weight: 1.5,
-              opacity: 0.9,
+              weight: 2,
+              opacity: 0.95,
               fillOpacity: 0.85,
             });
 
             marker.bindPopup(`
-              <div style="font-family: -apple-system, sans-serif; font-size: 13px; color: #0F172A;">
-                <div style="font-weight: 800; font-size: 14px; margin-bottom: 4px; color: #1E293B;">
-                  ${p.carrier || 'Operator'} - ${p.radio || 'Mobile'}
+              <div style="font-family: inherit; font-size: 13px; color: #F8FAFC; min-width: 170px;">
+                <div style="font-weight: 800; font-size: 14px; margin-bottom: 6px; color: #60A5FA; display: flex; align-items: center; justify-content: space-between;">
+                  <span>${p.carrier || 'Operator'}</span>
+                  <span style="font-size: 11px; background: rgba(255,255,255,0.1); padding: 1px 6px; border-radius: 4px; color: #94A3B8;">${p.radio || 'Mobile'}</span>
                 </div>
-                <div>Downlink: <b>${p.down_mbps != null ? p.down_mbps.toFixed(1) : '--'} Mbps</b></div>
-                <div>Uplink: <b>${p.up_mbps != null ? p.up_mbps.toFixed(1) : '--'} Mbps</b></div>
-                <div>Latency: <b>${p.latency_ms != null ? Math.round(p.latency_ms) : '--'} ms</b></div>
-                <div>Signal: <b>${p.signal_dbm != null ? `${p.signal_dbm} dBm` : 'N/A'}</b></div>
-                <div style="margin-top: 6px; padding: 2px 6px; border-radius: 4px; background: ${p.color}; color: #FFFFFF; font-weight: 700; display: inline-block;">
-                  ${p.rating}
+                <div style="margin-bottom: 2px;">Downlink: <b style="color: #10B981;">${p.down_mbps != null ? p.down_mbps.toFixed(1) : '--'} Mbps</b></div>
+                <div style="margin-bottom: 2px;">Uplink: <b style="color: #60A5FA;">${p.up_mbps != null ? p.up_mbps.toFixed(1) : '--'} Mbps</b></div>
+                <div style="margin-bottom: 2px;">Latency: <b>${p.latency_ms != null ? Math.round(p.latency_ms) : '--'} ms</b></div>
+                <div style="margin-bottom: 6px;">Signal: <b>${p.signal_dbm != null ? `${p.signal_dbm} dBm` : 'N/A'}</b></div>
+                <div style="padding: 3px 8px; border-radius: 6px; background: ${p.color}; color: #FFFFFF; font-weight: 700; font-size: 11px; display: inline-block;">
+                  ${p.rating} Performance
                 </div>
               </div>
             `);
 
             marker.on('click', () => onPointSelect?.(p));
             markersLayerRef.current?.addLayer(marker);
+            markerList.push(marker);
           }
         });
+
+        // Fit bounds on first load
+        if (isInitialLoad.current && markerList.length > 0 && leafletInstance.current) {
+          const group = L.featureGroup(markerList);
+          leafletInstance.current.fitBounds(group.getBounds().pad(0.35), {
+            maxZoom: 11,
+          });
+          isInitialLoad.current = false;
+        }
       }
     } catch (err) {
       console.error('Failed to load crowdsource points:', err);
@@ -158,7 +177,7 @@ export const CoverageMap: React.FC<CoverageMapProps> = ({ onPointSelect }) => {
     if (navigator.geolocation && leafletInstance.current) {
       navigator.geolocation.getCurrentPosition(
         pos => {
-          leafletInstance.current?.flyTo([pos.coords.latitude, pos.coords.longitude], 14, {
+          leafletInstance.current?.flyTo([pos.coords.latitude, pos.coords.longitude], 13, {
             duration: 1.5,
           });
         },
@@ -197,7 +216,7 @@ export const CoverageMap: React.FC<CoverageMapProps> = ({ onPointSelect }) => {
                 borderRadius: '12px',
                 overflow: 'hidden',
                 zIndex: 2000,
-                boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
               }}
             >
               {searchResults.map((item, i) => (
