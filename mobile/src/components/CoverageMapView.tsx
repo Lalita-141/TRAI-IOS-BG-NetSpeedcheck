@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Sample } from '../types';
+import { getConfig } from '../config';
 import {
   SearchIcon,
   ChevronDownIcon,
@@ -116,8 +117,27 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
       return;
     }
 
-    // Dynamic Geocoding via Nominatim
+    // Dynamic Geocoding via Server Proxy (with Nominatim fallback)
     setIsSearching(true);
+    try {
+      const config = await getConfig();
+      const serverUrl = config.serverUrl.replace(/\/+$/, '');
+      const response = await fetch(
+        `${serverUrl}/v1/locations/search?q=${encodeURIComponent(searchQuery)}`,
+        { headers: { Accept: 'application/json' } }
+      );
+      if (response.ok) {
+        const results = await response.json();
+        if (Array.isArray(results) && results.length > 0) {
+          const { lat, lng: lon } = results[0];
+          webViewRef.current?.injectJavaScript(`window.flyToLocation(${lat}, ${lon}, 12); true;`);
+          return;
+        }
+      }
+    } catch {
+      // Backend proxy unavailable, proceed to direct fallback
+    }
+
     try {
       const response = await fetch(
         `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
@@ -199,24 +219,24 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body {
       margin: 0; padding: 0; width: 100%; height: 100%;
-      background: #0B0F19;
+      background: #F8FAFC;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
       overflow: hidden;
     }
-    #map { width: 100%; height: 100%; background: #0B0F19; }
+    #map { width: 100%; height: 100%; background: #F8FAFC; }
 
-    /* Custom Leaflet Dark Popup */
+    /* Custom Leaflet Light Popup */
     .leaflet-popup-content-wrapper {
-      background: #111827 !important;
-      color: #F8FAFC !important;
-      border: 1px solid #1E293B !important;
+      background: #FFFFFF !important;
+      color: #0F172A !important;
+      border: 1px solid #E2E8F0 !important;
       border-radius: 14px !important;
       padding: 0 !important;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.5) !important;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.18) !important;
     }
     .leaflet-popup-tip {
-      background: #111827 !important;
-      border: 1px solid #1E293B !important;
+      background: #FFFFFF !important;
+      border: 1px solid #E2E8F0 !important;
     }
     .popup-container {
       padding: 12px 14px;
@@ -226,14 +246,14 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
       display: flex;
       align-items: center;
       justify-content: space-between;
-      border-bottom: 1px solid #1E293B;
+      border-bottom: 1px solid #E2E8F0;
       padding-bottom: 8px;
       margin-bottom: 8px;
     }
     .popup-title {
       font-size: 13px;
       font-weight: 800;
-      color: #FFFFFF;
+      color: #0F172A;
       letter-spacing: -0.2px;
     }
     .popup-badge {
@@ -244,22 +264,22 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
       font-weight: 700;
       text-transform: uppercase;
     }
-    .badge-excellent { background: rgba(16, 185, 129, 0.2); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.4); }
-    .badge-better { background: rgba(20, 184, 166, 0.2); color: #14B8A6; border: 1px solid rgba(20, 184, 166, 0.4); }
-    .badge-good { background: rgba(245, 158, 11, 0.2); color: #F59E0B; border: 1px solid rgba(245, 158, 11, 0.4); }
-    .badge-poor { background: rgba(239, 68, 68, 0.2); color: #EF4444; border: 1px solid rgba(239, 68, 68, 0.4); }
+    .badge-excellent { background: rgba(16, 185, 129, 0.15); color: #059669; border: 1px solid rgba(16, 185, 129, 0.35); }
+    .badge-better { background: rgba(20, 184, 166, 0.15); color: #0D9488; border: 1px solid rgba(20, 184, 166, 0.35); }
+    .badge-good { background: rgba(245, 158, 11, 0.15); color: #D97706; border: 1px solid rgba(245, 158, 11, 0.35); }
+    .badge-poor { background: rgba(239, 68, 68, 0.15); color: #DC2626; border: 1px solid rgba(239, 68, 68, 0.35); }
 
     .popup-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
       font-size: 11px;
-      color: #94A3B8;
+      color: #64748B;
       margin: 4px 0;
     }
     .popup-val {
       font-weight: 700;
-      color: #F8FAFC;
+      color: #0F172A;
     }
     .popup-op {
       font-size: 11px;
@@ -271,8 +291,8 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
       gap: 4px;
     }
     .leaflet-container .leaflet-control-attribution {
-      background: rgba(11, 15, 25, 0.7) !important;
-      color: #64748B !important;
+      background: rgba(255, 255, 255, 0.85) !important;
+      color: #475569 !important;
       font-size: 9px !important;
       padding: 2px 6px !important;
       border-radius: 4px !important;
@@ -280,7 +300,7 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
       margin-bottom: 6px !important;
     }
     .leaflet-container .leaflet-control-attribution a {
-      color: #94A3B8 !important;
+      color: #0284C7 !important;
       text-decoration: none !important;
     }
   </style>
@@ -304,11 +324,10 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
       maxZoom: 18
     }).setView([centerLat, centerLng], 11);
 
-    // Tile layers
-    var darkLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    // Tile layers (Light Theme: Esri World Street Map - Completely free, no API key needed)
+    var lightLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
       maxZoom: 19,
-      subdomains: 'abcd',
-      attribution: '&copy; OpenStreetMap, &copy; CARTO'
+      attribution: '&copy; Esri &mdash; Street Map'
     }).addTo(map);
 
     var satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
@@ -318,11 +337,11 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
 
     window.setMapType = function(type) {
       if (type === 'satellite') {
-        map.removeLayer(darkLayer);
+        map.removeLayer(lightLayer);
         satelliteLayer.addTo(map);
       } else {
         map.removeLayer(satelliteLayer);
-        darkLayer.addTo(map);
+        lightLayer.addTo(map);
       }
     };
 
@@ -475,11 +494,11 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
           var hexCoords = getHexagonVertices(hLat, hLng, r);
 
           var polygon = L.polygon(hexCoords, {
-            color: '#0B0F19',
-            weight: 1.2,
-            opacity: 0.9,
+            color: '#FFFFFF',
+            weight: 1.5,
+            opacity: 0.95,
             fillColor: color,
-            fillOpacity: 0.82,
+            fillOpacity: 0.72,
             smoothFactor: 1
           });
 
@@ -566,11 +585,11 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
 
       {/* 2. Search Bar */}
       <View style={styles.searchContainer}>
-        <SearchIcon size={18} color="#94A3B8" />
+        <SearchIcon size={18} color="#64748B" />
         <TextInput
           style={styles.searchInput}
           placeholder="Search for location..."
-          placeholderTextColor="#64748B"
+          placeholderTextColor="#94A3B8"
           value={searchQuery}
           onChangeText={setSearchQuery}
           onSubmitEditing={handleSearch}
@@ -584,7 +603,7 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
           <TouchableOpacity
             onPress={() => setSearchQuery('')}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <CloseIcon size={16} color="#94A3B8" />
+            <CloseIcon size={16} color="#64748B" />
           </TouchableOpacity>
         ) : null}
       </View>
@@ -602,9 +621,9 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
               {selectedMetric}
             </Text>
             {activeDropdown === 'metric' ? (
-              <ChevronUpIcon size={14} color="#CBD5E1" />
+              <ChevronUpIcon size={14} color="#64748B" />
             ) : (
-              <ChevronDownIcon size={14} color="#CBD5E1" />
+              <ChevronDownIcon size={14} color="#64748B" />
             )}
           </TouchableOpacity>
         </View>
@@ -620,9 +639,9 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
               {selectedTech}
             </Text>
             {activeDropdown === 'technology' ? (
-              <ChevronUpIcon size={14} color="#CBD5E1" />
+              <ChevronUpIcon size={14} color="#64748B" />
             ) : (
-              <ChevronDownIcon size={14} color="#CBD5E1" />
+              <ChevronDownIcon size={14} color="#64748B" />
             )}
           </TouchableOpacity>
         </View>
@@ -638,9 +657,9 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
               {selectedOperator}
             </Text>
             {activeDropdown === 'operator' ? (
-              <ChevronUpIcon size={14} color="#CBD5E1" />
+              <ChevronUpIcon size={14} color="#64748B" />
             ) : (
-              <ChevronDownIcon size={14} color="#CBD5E1" />
+              <ChevronDownIcon size={14} color="#64748B" />
             )}
           </TouchableOpacity>
         </View>
@@ -837,7 +856,7 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0B0F19', // Midnight Slate, absolutely zero purple!
+    backgroundColor: '#F4F6FA',
     paddingHorizontal: 16,
     paddingTop: 10,
     paddingBottom: 8,
@@ -849,24 +868,29 @@ const styles = StyleSheet.create({
   screenTitle: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#FFFFFF',
+    color: '#0F172A',
     letterSpacing: -0.3,
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#111827',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#1E293B',
+    borderColor: '#E2E8F0',
     borderRadius: 22,
     paddingHorizontal: 14,
     height: 42,
     marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
   },
   searchInput: {
     flex: 1,
     fontSize: 13,
-    color: '#FFFFFF',
+    color: '#0F172A',
     marginLeft: 8,
     paddingVertical: 0,
   },
@@ -881,7 +905,7 @@ const styles = StyleSheet.create({
   },
   filterLabel: {
     fontSize: 11,
-    color: '#94A3B8',
+    color: '#64748B',
     fontWeight: '600',
     marginBottom: 4,
     marginLeft: 2,
@@ -890,45 +914,55 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#111827',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#1E293B',
+    borderColor: '#E2E8F0',
     borderRadius: 20,
     paddingHorizontal: 12,
     height: 38,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
   },
   filterPillActive: {
     borderColor: '#00A389',
-    backgroundColor: '#162235',
+    backgroundColor: '#E6F8F5',
   },
   filterPillText: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#F1F5F9',
+    color: '#0F172A',
     flex: 1,
     marginRight: 4,
   },
   mapCard: {
     flex: 1,
-    backgroundColor: '#0B0F19',
+    backgroundColor: '#FFFFFF',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#1E293B',
+    borderColor: '#E2E8F0',
     overflow: 'hidden',
     position: 'relative',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
   },
   webview: {
     flex: 1,
-    backgroundColor: '#0B0F19',
+    backgroundColor: '#F8FAFC',
   },
   loadingContainer: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: '#0B0F19',
+    backgroundColor: '#F8FAFC',
     alignItems: 'center',
     justifyContent: 'center',
   },
   loadingText: {
-    color: '#94A3B8',
+    color: '#64748B',
     fontSize: 12,
     fontWeight: '600',
     marginTop: 10,
@@ -938,11 +972,16 @@ const styles = StyleSheet.create({
     top: 12,
     left: 12,
     flexDirection: 'row',
-    backgroundColor: 'rgba(15, 23, 42, 0.88)',
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
     borderRadius: 8,
     padding: 3,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
     zIndex: 10,
   },
   mapTypeBtn: {
@@ -951,15 +990,15 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   mapTypeBtnActive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    backgroundColor: '#E6F8F5',
   },
   mapTypeText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#94A3B8',
+    color: '#64748B',
   },
   mapTypeTextActive: {
-    color: '#FFFFFF',
+    color: '#00A389',
     fontWeight: '800',
   },
   mapControlsStack: {
@@ -979,9 +1018,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
+    shadowOpacity: 0.15,
     shadowRadius: 4,
     elevation: 4,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
   zoomStackContainer: {
     width: 38,
@@ -990,10 +1031,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
+    shadowOpacity: 0.15,
     shadowRadius: 4,
     elevation: 4,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
   zoomBtn: {
     width: 38,
@@ -1026,18 +1069,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#111827',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#1E293B',
+    borderColor: '#E2E8F0',
     borderRadius: 18,
     paddingVertical: 7,
     paddingHorizontal: 6,
     gap: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 2,
+    elevation: 1,
   },
   legendPillText: {
     fontSize: 10.5,
     fontWeight: '700',
-    color: '#E2E8F0',
+    color: '#334155',
   },
   legendDot: {
     width: 7,

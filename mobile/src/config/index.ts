@@ -1,3 +1,4 @@
+import { Platform, NativeModules } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppConfig } from '../types';
 import { generateUUID } from '../utils/uuid';
@@ -6,8 +7,8 @@ const STORAGE_KEY_CONFIG = '@speedmonitor_config';
 const STORAGE_KEY_DEVICE_ID = '@speedmonitor_device_id';
 
 export const DEFAULT_CONFIG: AppConfig = {
-  serverUrl: 'https://140-245-3-81.sslip.io', // Production HTTPS Backend
-  // serverUrl: 'http://172.20.1.86:8000', // Local development÷
+  // serverUrl: 'https://140-245-3-81.sslip.io', // Production HTTPS Backend
+  serverUrl: 'http://172.20.1.86:8000', // Local development÷ mac IP address
   testIntervalSeconds: 10, // 10 seconds for rapid background & killed state verification
   downloadMB: 2,
   uploadMB: 1,
@@ -21,6 +22,21 @@ let cachedConfig: AppConfig | null = null;
 
 export async function getDeviceId(): Promise<string> {
   if (cachedDeviceId) return cachedDeviceId;
+
+  // On iOS, synchronize with the native vendor ID so foreground & background share the exact same device ID
+  if (Platform.OS === 'ios' && NativeModules.NativeMonitorBridge?.getDeviceId) {
+    try {
+      const nativeId: string = await NativeModules.NativeMonitorBridge.getDeviceId();
+      if (nativeId && nativeId.trim().length > 0) {
+        cachedDeviceId = nativeId.trim();
+        await AsyncStorage.setItem(STORAGE_KEY_DEVICE_ID, cachedDeviceId);
+        return cachedDeviceId;
+      }
+    } catch {
+      // fallback to storage
+    }
+  }
+
   try {
     const saved = await AsyncStorage.getItem(STORAGE_KEY_DEVICE_ID);
     if (saved) {

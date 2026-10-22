@@ -108,6 +108,134 @@ class Uploader {
       return { success: false, error: err?.message || 'Network request failed' };
     }
   }
+
+  /**
+   * Submits telecom service feedback or coverage complaint to backend
+   */
+  async submitFeedback(feedback: {
+    deviceId: string;
+    carrier?: string | null;
+    rating: number;
+    category?: string;
+    comment?: string;
+    lat?: number | null;
+    lng?: number | null;
+  }): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const config = await getConfig();
+      const serverUrl = config.serverUrl.replace(/\/+$/, '');
+      const res = await fetch(`${serverUrl}/v1/feedback`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          device_id: feedback.deviceId,
+          carrier: feedback.carrier,
+          rating: feedback.rating,
+          category: feedback.category,
+          comment: feedback.comment,
+          lat: feedback.lat,
+          lng: feedback.lng,
+        }),
+      });
+
+      if (!res.ok) {
+        return { success: false, error: `HTTP ${res.status}: Failed to submit feedback` };
+      }
+
+      const data = await res.json();
+      return { success: true, id: data.id };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Network error submitting feedback' };
+    }
+  }
+
+  /**
+   * Syncs and restores cloud test history for a specific device from backend
+   */
+  async fetchDeviceHistory(
+    deviceId: string,
+    limit: number = 100
+  ): Promise<{ success: boolean; samples?: any[]; error?: string }> {
+    try {
+      const config = await getConfig();
+      const serverUrl = config.serverUrl.replace(/\/+$/, '');
+      const res = await fetch(
+        `${serverUrl}/v1/devices/${encodeURIComponent(deviceId)}/history?limit=${limit}`,
+        {
+          headers: {
+            Accept: 'application/json',
+          },
+        }
+      );
+
+      if (!res.ok) {
+        return { success: false, error: `HTTP ${res.status}: Failed to fetch history` };
+      }
+
+      const data = await res.json();
+      return { success: true, samples: data.samples || [] };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Cloud history sync failed' };
+    }
+  }
+
+  /**
+   * Retrieves nearby operator benchmarks around given GPS coordinates
+   */
+  async fetchNearbyCoverage(
+    lat: number,
+    lng: number,
+    radiusKm: number = 5
+  ): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      const config = await getConfig();
+      const serverUrl = config.serverUrl.replace(/\/+$/, '');
+      const res = await fetch(
+        `${serverUrl}/v1/coverage/nearby?lat=${lat}&lng=${lng}&radius_km=${radiusKm}`,
+        {
+          headers: {
+            Accept: 'application/json',
+          },
+        }
+      );
+
+      if (!res.ok) {
+        return { success: false, error: `HTTP ${res.status}: Nearby coverage failed` };
+      }
+
+      const data = await res.json();
+      return { success: true, data };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Nearby coverage query failed' };
+    }
+  }
+
+  /**
+   * Fetches latest remote configuration from server
+   */
+  async fetchRemoteConfig(): Promise<{ success: boolean; config?: any; error?: string }> {
+    try {
+      const config = await getConfig();
+      const serverUrl = config.serverUrl.replace(/\/+$/, '');
+      const res = await fetch(`${serverUrl}/v1/config/app`, {
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+
+      if (!res.ok) {
+        return { success: false, error: `HTTP ${res.status}: Remote config failed` };
+      }
+
+      const data = await res.json();
+      return { success: true, config: data };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Config fetch failed' };
+    }
+  }
 }
 
 export const uploader = new Uploader();

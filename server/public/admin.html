@@ -247,8 +247,8 @@
     // Initialize Map with Clean Voyager Tiles (No API Key Required)
     function initMap() {
       map = L.map('admin-map').setView([20.5937, 78.9629], 5); // India center
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap, &copy; CARTO',
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
         maxZoom: 19
       }).addTo(map);
       markerLayer = L.layerGroup().addTo(map);

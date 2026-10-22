@@ -111,10 +111,15 @@ class MonitorService {
       }
     }, 5000); // Check every 5s if interval passed
 
-    // 4. Start Native iOS background daemon if available (for killed state relaunch \u0026 native background execution)
+    // 4. Start Native iOS background daemon if available (for killed state relaunch & native background execution)
     if (Platform.OS === 'ios' && NativeModules.NativeMonitorBridge) {
       try {
-        NativeModules.NativeMonitorBridge.start(config.serverUrl, intervalSeconds);
+        const deviceId = await getDeviceId();
+        if (typeof NativeModules.NativeMonitorBridge.startWithConfig === 'function') {
+          NativeModules.NativeMonitorBridge.startWithConfig(config.serverUrl, intervalSeconds, deviceId);
+        } else {
+          NativeModules.NativeMonitorBridge.start(config.serverUrl, intervalSeconds);
+        }
       } catch (e) {
         console.warn('NativeMonitorBridge.start error:', e);
       }

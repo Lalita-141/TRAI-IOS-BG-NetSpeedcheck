@@ -1,3 +1,5 @@
+import { getConfig } from '../config';
+
 const geocodeCache: Record<string, string> = {
   // Pre-seed common test locations for instant offline display
   '37.786_-122.406': 'Union Square, San Francisco',
@@ -23,6 +25,31 @@ export async function reverseGeocode(
     return geocodeCache[key];
   }
 
+  // 1. Try backend server proxy /v1/locations/reverse first
+  try {
+    const config = await getConfig();
+    const serverUrl = config.serverUrl.replace(/\/+$/, '');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3500);
+
+    const res = await fetch(`${serverUrl}/v1/locations/reverse?lat=${lat}&lng=${lng}`, {
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.display_name) {
+        geocodeCache[key] = data.display_name;
+        return data.display_name;
+      }
+    }
+  } catch {
+    // Fallback to direct geocoding if server proxy unavailable
+  }
+
+  // 2. Direct Nominatim fallback
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3500);
