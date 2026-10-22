@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { AppConfig, Sample } from '../types';
 import { sampleStore } from '../services/sampleStore';
+import { uploader } from '../services/uploader';
 import { SpeedGauge } from './SpeedGauge';
 import { MonitorStatus } from '../services/monitorService';
 import { SpeedTestProgressView } from './SpeedTestProgressView';
@@ -102,12 +103,20 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
   const [isContinuousRunning, setIsContinuousRunning] = useState<boolean>(false);
   const [continuousConfig, setContinuousConfig] = useState<ContinuousTestConfig | null>(null);
   const [continuousResults, setContinuousResults] = useState<ContinuousTestSessionResults | null>(null);
+  const [nearbyCoverage, setNearbyCoverage] = useState<any>(null);
 
-
-
-
-
-
+  useEffect(() => {
+    if (status.lastSample?.lat && status.lastSample?.lng) {
+      uploader
+        .fetchNearbyCoverage(status.lastSample.lat, status.lastSample.lng, 5)
+        .then(res => {
+          if (res.success && res.data?.operators?.length > 0) {
+            setNearbyCoverage(res.data);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [status.lastSample?.lat, status.lastSample?.lng]);
   // Auto transition between home -> testing -> result (ONLY for manual speed test on home)
   const prevTestingRef = useRef(status.isTesting);
   useEffect(() => {
@@ -648,6 +657,22 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
               )}
             </TouchableOpacity>
           </View>
+
+          {/* Nearby Operator QoS Intelligence Card */}
+          {nearbyCoverage && nearbyCoverage.operators?.length > 0 && (
+            <View style={styles.nearbyCard}>
+              <View style={styles.nearbyHeaderRow}>
+                <Text style={styles.nearbyTitle}>⚡ Top Operator in Your Area</Text>
+                <Text style={styles.nearbyRadiusText}>Within {nearbyCoverage.radius_km} km</Text>
+              </View>
+              <View style={styles.nearbyOpRow}>
+                <Text style={styles.nearbyOpName}>{nearbyCoverage.operators[0].carrier}</Text>
+                <Text style={styles.nearbyOpSpeed}>
+                  Avg {nearbyCoverage.operators[0].avg_down_mbps} Mbps • {nearbyCoverage.operators[0].avg_latency_ms} ms latency
+                </Text>
+              </View>
+            </View>
+          )}
         </View>
       )}
 
@@ -1262,5 +1287,44 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  nearbyCard: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 14,
+    padding: 12,
+    marginTop: 10,
+  },
+  nearbyHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  nearbyTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#166534',
+  },
+  nearbyRadiusText: {
+    fontSize: 10.5,
+    fontWeight: '600',
+    color: '#15803D',
+  },
+  nearbyOpRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  nearbyOpName: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  nearbyOpSpeed: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: '#00A389',
   },
 });

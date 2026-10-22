@@ -16,6 +16,20 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
     private var intervalSeconds: TimeInterval = 10.0 // 10s for rapid background & killed state verification
     private var serverUrlString: String = "https://140-245-3-81.sslip.io"
     
+    private var configuredDeviceId: String {
+        get {
+            if let saved = UserDefaults.standard.string(forKey: "netspeed_device_id"), !saved.isEmpty {
+                return saved
+            }
+            let vendorId = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+            UserDefaults.standard.set(vendorId, forKey: "netspeed_device_id")
+            return vendorId
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "netspeed_device_id")
+        }
+    }
+    
     private override init() {
         super.init()
         lm.delegate = self
@@ -30,9 +44,16 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
         }
     }
     
-    func configure(serverUrl: String, interval: Double) {
+    func configure(serverUrl: String, interval: Double, deviceId: String? = nil) {
         self.serverUrlString = serverUrl
         self.intervalSeconds = max(interval, 5.0)
+        if let dId = deviceId, !dId.isEmpty {
+            self.configuredDeviceId = dId
+        }
+    }
+    
+    func getDeviceId() -> String {
+        return configuredDeviceId
     }
     
     func startMonitoring() {
@@ -199,7 +220,7 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
         
         // 5. Build Sample & Upload to server
         let sampleId = UUID().uuidString
-        let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+        let deviceId = configuredDeviceId
         let lat = location?.coordinate.latitude ?? 18.5501
         let lng = location?.coordinate.longitude ?? 73.9410
         let accuracy = location?.horizontalAccuracy ?? 5.0
@@ -233,7 +254,7 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
         if let body = try? JSONSerialization.data(withJSONObject: ["samples": [samplePayload]]) {
             ingestReq.httpBody = body
             _ = try? await session.data(for: ingestReq)
-            NSLog("[NativeMonitorService] Successfully uploaded background/killed sample \(sampleId) -> \(downMbps) Mbps")
+            NSLog("[NativeMonitorService] Successfully uploaded background/killed sample \(sampleId) -> \(downMbps) Mbps (Device: \(deviceId))")
         }
     }
 }
@@ -254,6 +275,22 @@ final class NativeMonitorBridge: NSObject, RCTBridgeModule {
             NativeMonitorService.shared.configure(serverUrl: serverUrl, interval: interval)
             NativeMonitorService.shared.startMonitoring()
             resolve(true)
+        }
+    }
+    
+    @objc(startWithConfig:interval:deviceId:resolver:rejecter:)
+    func startWithConfig(serverUrl: String, interval: Double, deviceId: String, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            NativeMonitorService.shared.configure(serverUrl: serverUrl, interval: interval, deviceId: deviceId)
+            NativeMonitorService.shared.startMonitoring()
+            resolve(true)
+        }
+    }
+    
+    @objc(getDeviceId:rejecter:)
+    func getDeviceId(resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            resolve(NativeMonitorService.shared.getDeviceId())
         }
     }
     

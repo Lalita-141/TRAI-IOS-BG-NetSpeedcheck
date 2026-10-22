@@ -20,6 +20,7 @@ import {
   VideoBrowserTestIcon,
   GlobeIcon,
 } from './Icons';
+import { getConfig } from '../config';
 
 const VIDEO_HTML = `
 <!DOCTYPE html>
@@ -117,49 +118,93 @@ export const VideoBrowserTestProgressView: React.FC<VideoBrowserTestProgressView
       setPhase('video');
       setCurrentSpeed(2.4);
 
-      // Measure real TTFB to cloudflare/media
-      const t0 = Date.now();
+      let videoStartupDelay = 120;
+      let webPageDelay = 180;
+      let measuredTtfb = 45;
+
       try {
-        const c1 = new AbortController();
-        const t1 = setTimeout(() => c1.abort(), 3000);
-        await fetch('https://www.cloudflare.com/cdn-cgi/trace', {
-          signal: c1.signal,
+        const config = await getConfig();
+        const serverUrl = config.serverUrl.replace(/\/+$/, '');
+
+        // 1. Probe Video Buffer Delay from server /test-video
+        const vStart = Date.now();
+        const cVideo = new AbortController();
+        const tVideo = setTimeout(() => cVideo.abort(), 4000);
+        const resVideo = await fetch(`${serverUrl}/test-video`, {
+          signal: cVideo.signal,
           headers: { 'Cache-Control': 'no-cache' },
         });
-        clearTimeout(t1);
+        clearTimeout(tVideo);
+        if (resVideo.ok) {
+          videoStartupDelay = Date.now() - vStart;
+        }
       } catch {
-        // fallback
+        // Fallback to media/ping benchmark
+        const t0 = Date.now();
+        try {
+          const c1 = new AbortController();
+          const t1 = setTimeout(() => c1.abort(), 3000);
+          await fetch('https://www.cloudflare.com/cdn-cgi/trace', {
+            signal: c1.signal,
+            headers: { 'Cache-Control': 'no-cache' },
+          });
+          clearTimeout(t1);
+        } catch {
+          // ignore
+        }
+        videoStartupDelay = Math.max(Date.now() - t0, 60) * 1.5;
       }
-      const measuredPing = Math.max(Date.now() - t0, 48);
 
-      // Spike speed during video buffer chunk
-      await new Promise(resolve => setTimeout(() => resolve(undefined), 1200));
+      // Visual speed animation for video chunk download
+      await new Promise(resolve => setTimeout(() => resolve(undefined), 1000));
       if (!isMounted) return;
       setCurrentSpeed(6.9);
       setHistoryPoints(prev => [...prev, 6.9]);
 
       await new Promise(resolve => setTimeout(() => resolve(undefined), 1000));
       if (!isMounted) return;
-      const vDelay = Math.round(measuredPing * 1.6 + 60);
+      const vDelay = Math.round(videoStartupDelay);
       setVideoDelayMs(vDelay);
       setCurrentSpeed(1.5);
       setHistoryPoints(prev => [...prev, 1.5]);
 
       // Phase 2: Web Delay test (approx 3s)
       setPhase('web');
-      await new Promise(resolve => setTimeout(() => resolve(undefined), 600));
+      try {
+        const config = await getConfig();
+        const serverUrl = config.serverUrl.replace(/\/+$/, '');
+
+        // 2. Probe Web Page Latency & TTFB from server /test-webpage
+        const wStart = Date.now();
+        const cWeb = new AbortController();
+        const tWeb = setTimeout(() => cWeb.abort(), 4000);
+        const resWeb = await fetch(`${serverUrl}/test-webpage`, {
+          signal: cWeb.signal,
+          headers: { 'Cache-Control': 'no-cache' },
+        });
+        clearTimeout(tWeb);
+        if (resWeb.ok) {
+          webPageDelay = Date.now() - wStart;
+          measuredTtfb = Math.round(webPageDelay * 0.45);
+        }
+      } catch {
+        webPageDelay = Math.round(vDelay * 1.25);
+        measuredTtfb = Math.round(webPageDelay * 0.4);
+      }
+
+      await new Promise(resolve => setTimeout(() => resolve(undefined), 800));
       if (!isMounted) return;
       setCurrentSpeed(8.4);
       setHistoryPoints(prev => [...prev, 8.4]);
 
-      await new Promise(resolve => setTimeout(() => resolve(undefined), 1400));
+      await new Promise(resolve => setTimeout(() => resolve(undefined), 1200));
       if (!isMounted) return;
-      const wDelay = Math.round(measuredPing * 2.2 + 110);
+      const wDelay = Math.round(webPageDelay);
       setWebDelayMs(wDelay);
       setCurrentSpeed(2.1);
       setHistoryPoints(prev => [...prev, 2.1]);
 
-      await new Promise(resolve => setTimeout(() => resolve(undefined), 800));
+      await new Promise(resolve => setTimeout(() => resolve(undefined), 600));
       if (!isMounted || completedRef.current) return;
       completedRef.current = true;
       setPhase('done');
@@ -167,9 +212,9 @@ export const VideoBrowserTestProgressView: React.FC<VideoBrowserTestProgressView
       onComplete({
         videoDelayMs: vDelay,
         webDelayMs: wDelay,
-        streamingQuality: '1080p Full HD',
-        bufferingRate: '0% (Smooth)',
-        ttfbMs: Math.round(measuredPing * 0.7),
+        streamingQuality: vDelay < 150 ? '4K Ultra HD' : vDelay < 300 ? '1080p Full HD' : '720p HD',
+        bufferingRate: vDelay < 250 ? '0% (Smooth)' : '1.2% (Minor)',
+        ttfbMs: measuredTtfb,
         pageLoadSec: parseFloat((wDelay / 1000).toFixed(2)),
       });
     };

@@ -79,6 +79,9 @@ function AppContent() {
       }
     });
 
+    // Check remote configuration from server
+    uploader.fetchRemoteConfig().catch(() => {});
+
     // Subscribe to monitor service updates
     const unsubscribe = monitorService.subscribe(newStatus => {
       setStatus(newStatus);
@@ -134,8 +137,8 @@ function AppContent() {
   };
 
   return (
-    <SafeAreaView style={[styles.safeArea, currentTab === 'MAP' && styles.safeAreaDark]}>
-      <StatusBar barStyle={currentTab === 'MAP' ? 'light-content' : 'dark-content'} />
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="dark-content" />
 
         {/* Top Header Bar (Matching EXACT Theme Mockup) - Hidden on MAP tab */}
         {!isFullScreenTest && !hideTopBarOnly && currentTab !== 'MAP' && (
@@ -234,26 +237,21 @@ function AppContent() {
 
         {/* Bottom Navigation Bar */}
         {!isFullScreenTest && (
-          <View style={[styles.bottomNav, currentTab === 'MAP' && styles.bottomNavDark]}>
+          <View style={styles.bottomNav}>
             <TouchableOpacity
               style={styles.navItem}
               onPress={() => setCurrentTab('SPEED')}
               activeOpacity={0.7}>
-              {currentTab === 'MAP' ? (
-                <HomeIcon size={22} color="#94A3B8" />
-              ) : (
-                <LightningIcon
-                  size={22}
-                  color={currentTab === 'SPEED' ? '#00A389' : '#94A3B8'}
-                />
-              )}
+              <LightningIcon
+                size={22}
+                color={currentTab === 'SPEED' ? '#00A389' : '#94A3B8'}
+              />
               <Text
                 style={[
                   styles.navLabel,
-                  currentTab === 'MAP' && styles.navLabelDark,
                   currentTab === 'SPEED' && styles.navLabelActive,
                 ]}>
-                {currentTab === 'MAP' ? t('nav_home', 'HOME') : t('nav_speed', 'Speed')}
+                {t('nav_speed', 'Speed')}
               </Text>
             </TouchableOpacity>
 
@@ -271,41 +269,31 @@ function AppContent() {
               <Text
                 style={[
                   styles.navLabel,
-                  currentTab === 'MAP' && styles.navLabelDark,
                   currentTab === 'HISTORY' && styles.navLabelActive,
                 ]}>
-                {currentTab === 'MAP' ? t('nav_history', 'HISTORY') : t('nav_history', 'History')}
+                {t('nav_history', 'History')}
               </Text>
             </TouchableOpacity>
 
-            {currentTab === 'MAP' ? (
-              <TouchableOpacity
-                style={styles.activeMapPill}
-                onPress={() => {
-                  setCurrentTab('MAP');
-                  loadData();
-                }}
-                activeOpacity={0.9}>
-                <MapPinIcon size={18} color="#0F172A" />
-                <Text style={styles.activeMapPillLabel}>{t('nav_map', 'MAP')}</Text>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={styles.navItem}
-                onPress={() => {
-                  setCurrentTab('MAP');
-                  loadData();
-                }}
-                activeOpacity={0.7}>
-                <MapNavIcon
-                  size={22}
-                  color="#94A3B8"
-                />
-                <Text style={styles.navLabel}>
-                  {t('nav_map', 'Map')}
-                </Text>
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity
+              style={styles.navItem}
+              onPress={() => {
+                setCurrentTab('MAP');
+                loadData();
+              }}
+              activeOpacity={0.7}>
+              <MapNavIcon
+                size={22}
+                color={currentTab === 'MAP' ? '#00A389' : '#94A3B8'}
+              />
+              <Text
+                style={[
+                  styles.navLabel,
+                  currentTab === 'MAP' && styles.navLabelActive,
+                ]}>
+                {t('nav_map', 'Map')}
+              </Text>
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.navItem}
@@ -318,10 +306,9 @@ function AppContent() {
               <Text
                 style={[
                   styles.navLabel,
-                  currentTab === 'MAP' && styles.navLabelDark,
                   currentTab === 'SETTINGS' && styles.navLabelActive,
                 ]}>
-                {currentTab === 'MAP' ? t('nav_settings', 'SETTINGS') : t('nav_settings', 'Settings')}
+                {t('nav_settings', 'Settings')}
               </Text>
             </TouchableOpacity>
           </View>
@@ -446,39 +433,5 @@ const styles = StyleSheet.create({
   navLabelActive: {
     color: '#00A389',
     fontWeight: '700',
-  },
-  safeAreaDark: {
-    backgroundColor: '#0B0F19',
-  },
-  bottomNavDark: {
-    backgroundColor: '#0B0F19',
-    borderTopColor: '#1E293B',
-    paddingVertical: 6,
-  },
-  navLabelDark: {
-    color: '#94A3B8',
-    fontSize: 9.5,
-    fontWeight: '700',
-    marginTop: 4,
-  },
-  activeMapPill: {
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    paddingVertical: 5,
-    paddingHorizontal: 22,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  activeMapPillLabel: {
-    color: '#0F172A',
-    fontSize: 10,
-    fontWeight: '800',
-    marginTop: 2,
   },
 });

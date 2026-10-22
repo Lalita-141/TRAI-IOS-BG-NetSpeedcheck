@@ -40,3 +40,17 @@ CREATE TABLE IF NOT EXISTS samples (
     INDEX idx_samples_radio (radio),
     INDEX idx_samples_coords (lat, lng)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS feedback (
+    id VARCHAR(64) PRIMARY KEY,
+    device_id VARCHAR(64) NOT NULL,
+    carrier VARCHAR(64) NULL,
+    rating INT NOT NULL,
+    category VARCHAR(64) NULL,
+    comment TEXT NULL,
+    lat DOUBLE NULL,
+    lng DOUBLE NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_feedback_device (device_id),
+    INDEX idx_feedback_carrier (carrier)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

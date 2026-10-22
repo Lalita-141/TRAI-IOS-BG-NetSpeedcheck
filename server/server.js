@@ -130,6 +130,64 @@ app.get('/v1/locations/search', (req, res) => {
     });
 });
 
+// Reverse Geocoding Proxy (Translates GPS lat/lng to readable locality/city for mobile clients)
+app.get('/v1/locations/reverse', (req, res) => {
+  const { lat, lng } = req.query;
+  if (!lat || !lng) {
+    return res.status(400).json({ error: 'lat and lng parameters are required' });
+  }
+
+  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}`;
+  const options = {
+    headers: {
+      'User-Agent': 'TRAI-MySpeed-Monitor/2.0 (contact@hareandturtle.ai)',
+      'Accept-Language': 'en',
+    },
+  };
+
+  https
+    .get(url, options, apiRes => {
+      let data = '';
+      apiRes.on('data', chunk => (data += chunk));
+      apiRes.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          const addr = parsed?.address || {};
+          const area =
+            addr.suburb ||
+            addr.neighbourhood ||
+            addr.quarter ||
+            addr.village ||
+            addr.city_district ||
+            addr.road ||
+            '';
+          const city =
+            addr.city ||
+            addr.town ||
+            addr.county ||
+            addr.state_district ||
+            addr.state ||
+            '';
+          const state = addr.state || '';
+          const parts = [area, city].filter(Boolean);
+          const displayName = parts.length > 0 ? parts.join(', ') : parsed.display_name || 'Local Area';
+
+          res.json({
+            area,
+            city,
+            state,
+            display_name: displayName,
+          });
+        } catch (e) {
+          res.json({ area: '', city: '', state: '', display_name: `Area (${parseFloat(lat).toFixed(2)}°, ${parseFloat(lng).toFixed(2)}°)` });
+        }
+      });
+    })
+    .on('error', () => {
+      res.json({ area: '', city: '', state: '', display_name: `Area (${parseFloat(lat).toFixed(2)}°, ${parseFloat(lng).toFixed(2)}°)` });
+    });
+});
+
 // --- 2. Middleware for Telemetry APIs ---
 app.use(express.json({ limit: '10mb' }));
 
@@ -148,7 +206,12 @@ app.get('/', (req, res) => {
       test_webpage: '/test-webpage',
       crowdsource_map: '/v1/crowdsource/map',
       location_search: '/v1/locations/search?q=delhi',
+      location_reverse: '/v1/locations/reverse?lat=18.52&lng=73.85',
       samples: '/v1/speed-samples',
+      device_history: '/v1/devices/:device_id/history',
+      nearby_coverage: '/v1/coverage/nearby?lat=18.52&lng=73.85',
+      feedback: '/v1/feedback',
+      app_config: '/v1/config/app',
       admin_stats: '/v1/admin/stats',
       admin_devices: '/v1/admin/devices',
       data_retention: '/v1/privacy/data-retention',
@@ -422,7 +485,7 @@ app.get('/v1/admin/devices', async (req, res) => {
   }
 });
 
-// Drill-Down: Specific Device Samples
+// Drill-Down: Specific Device Samples (Admin)
 app.get('/v1/admin/devices/:device_id/samples', async (req, res) => {
   const cleanId = (req.params.device_id || '').trim();
   try {
@@ -431,6 +494,148 @@ app.get('/v1/admin/devices/:device_id/samples', async (req, res) => {
   } catch (err) {
     return res.status(500).json({ error: 'Failed to fetch device samples.' });
   }
+});
+
+// Cloud History Sync for Mobile Devices (No API Key Required)
+app.get('/v1/devices/:device_id/history', async (req, res) => {
+  const deviceId = (req.params.device_id || '').trim();
+  const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+
+  if (!deviceId) {
+    return res.status(400).json({ error: 'Invalid device_id.' });
+  }
+
+  try {
+    const [rows] = await pool.query(
+      'SELECT * FROM samples WHERE device_id = ? ORDER BY ts DESC LIMIT ?',
+      [deviceId, limit]
+    );
+    return res.json({
+      device_id: deviceId,
+      count: rows.length,
+      samples: rows,
+    });
+  } catch (err) {
+    console.error('[Device History Error]:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch device history.' });
+  }
+});
+
+// Nearby Operator QoS Benchmark ("Best Operator in My Area")
+app.get('/v1/coverage/nearby', async (req, res) => {
+  const lat = parseFloat(req.query.lat);
+  const lng = parseFloat(req.query.lng);
+  const radiusKm = Math.min(parseFloat(req.query.radius_km || '5'), 25);
+
+  if (isNaN(lat) || isNaN(lng)) {
+    return res.status(400).json({ error: 'Valid lat and lng query parameters are required.' });
+  }
+
+  // 1 degree of latitude is ~111km; longitude scaled by cos(lat)
+  const deltaLat = radiusKm / 111.0;
+  const latRad = (lat * Math.PI) / 180.0;
+  const deltaLng = radiusKm / (111.0 * Math.cos(latRad) || 1.0);
+
+  const minLat = lat - deltaLat;
+  const maxLat = lat + deltaLat;
+  const minLng = lng - deltaLng;
+  const maxLng = lng + deltaLng;
+
+  const sql = `
+    SELECT carrier,
+           COUNT(*) AS sample_count,
+           AVG(down_mbps) AS avg_down_mbps,
+           AVG(up_mbps) AS avg_up_mbps,
+           AVG(latency_ms) AS avg_latency_ms,
+           AVG(signal_dbm) AS avg_signal_dbm
+    FROM samples
+    WHERE lat BETWEEN ? AND ?
+      AND lng BETWEEN ? AND ?
+      AND carrier IS NOT NULL AND carrier != '' AND carrier != '--'
+    GROUP BY carrier
+    ORDER BY avg_down_mbps DESC
+  `;
+
+  try {
+    const [rows] = await pool.query(sql, [minLat, maxLat, minLng, maxLng]);
+    const formatted = rows.map((r, idx) => ({
+      carrier: r.carrier,
+      sample_count: r.sample_count,
+      avg_down_mbps: parseFloat(Number(r.avg_down_mbps || 0).toFixed(1)),
+      avg_up_mbps: parseFloat(Number(r.avg_up_mbps || 0).toFixed(1)),
+      avg_latency_ms: Math.round(r.avg_latency_ms || 0),
+      avg_signal_dbm: r.avg_signal_dbm != null ? Math.round(r.avg_signal_dbm) : null,
+      rank: idx + 1,
+      rating: idx === 0 ? 'Best' : idx === 1 ? 'Good' : 'Fair',
+    }));
+
+    return res.json({
+      center: { lat, lng },
+      radius_km: radiusKm,
+      total_nearby_samples: rows.reduce((acc, curr) => acc + curr.sample_count, 0),
+      operators: formatted,
+    });
+  } catch (err) {
+    console.error('[Nearby Coverage Error]:', err.message);
+    return res.status(500).json({ error: 'Failed to compute nearby operator performance.' });
+  }
+});
+
+// Submit User Telecom Feedback or Coverage Complaint
+app.post('/v1/feedback', async (req, res) => {
+  const { device_id, carrier, rating, category, comment, lat, lng } = req.body;
+  if (!device_id || rating == null) {
+    return res.status(400).json({ error: 'device_id and rating are required' });
+  }
+
+  const feedbackId = 'fb_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+  const sql = `
+    INSERT INTO feedback (id, device_id, carrier, rating, category, comment, lat, lng)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `;
+
+  try {
+    await pool.query(sql, [
+      feedbackId,
+      device_id,
+      carrier || null,
+      parseInt(rating, 10),
+      category || 'General',
+      comment || '',
+      lat != null ? parseFloat(lat) : null,
+      lng != null ? parseFloat(lng) : null,
+    ]);
+    return res.json({ status: 'success', id: feedbackId });
+  } catch (err) {
+    console.error('[Feedback Insert Error]:', err.message);
+    return res.status(500).json({ error: 'Failed to record feedback.' });
+  }
+});
+
+// View Feedback & Complaints for Admin Dashboard
+app.get('/v1/admin/feedback', async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+  try {
+    const [rows] = await pool.query('SELECT * FROM feedback ORDER BY created_at DESC LIMIT ?', [limit]);
+    return res.json(rows);
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to fetch feedback logs.' });
+  }
+});
+
+// Dynamic Client App Remote Configuration
+app.get('/v1/config/app', (req, res) => {
+  res.json({
+    min_app_version: '1.0.0',
+    latest_app_version: '1.2.0',
+    force_update: false,
+    maintenance_mode: false,
+    default_download_mb: 2,
+    default_upload_mb: 1,
+    default_interval_seconds: 300,
+    wifi_only: false,
+    announcement: null,
+  });
 });
 
 // Filterable Telemetry Samples

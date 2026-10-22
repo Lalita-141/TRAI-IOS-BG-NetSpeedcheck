@@ -74,6 +74,24 @@ async function initDatabase() {
     `;
     await pool.query(createTableSql);
 
+    // 2b. Ensure feedback table exists
+    const createFeedbackTableSql = `
+      CREATE TABLE IF NOT EXISTS feedback (
+        id VARCHAR(64) PRIMARY KEY,
+        device_id VARCHAR(64) NOT NULL,
+        carrier VARCHAR(64) NULL,
+        rating INT NOT NULL,
+        category VARCHAR(64) NULL,
+        comment TEXT NULL,
+        lat DOUBLE NULL,
+        lng DOUBLE NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_feedback_device (device_id),
+        INDEX idx_feedback_carrier (carrier)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `;
+    await pool.query(createFeedbackTableSql);
+
     // 3. Schema Auto-Migration: add any columns if migrating an existing table
     const columnsToAdd = [
       { name: 'test_type', type: "VARCHAR(32) DEFAULT 'speed'" },

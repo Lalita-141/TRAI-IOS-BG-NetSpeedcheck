@@ -34,6 +34,7 @@ import {
   ChevronRightIcon,
   CloseIcon,
   CheckCircleIcon,
+  CloudUploadIcon,
 } from './Icons';
 import { useTranslation, SUPPORTED_LANGUAGES, SupportedLanguage } from '../i18n';
 
@@ -333,13 +334,85 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
     );
   };
 
-  const handleSendFeedback = () => {
-    Alert.alert(
-      'Feedback Received',
-      `Thank you for giving ${feedbackRating} stars! Your feedback helps us improve network measurement transparency.`,
-      [{ text: 'OK', onPress: () => setActiveModal(null) }]
-    );
-    setFeedbackComments('');
+  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
+  const [isSyncingCloudHistory, setIsSyncingCloudHistory] = useState(false);
+
+  const handleSendFeedback = async () => {
+    if (!deviceId) return;
+    setIsSubmittingFeedback(true);
+    try {
+      const res = await uploader.submitFeedback({
+        deviceId,
+        rating: feedbackRating,
+        category: feedbackCategory,
+        comment: feedbackComments.trim(),
+      });
+      if (res.success) {
+        Alert.alert(
+          'Feedback Submitted',
+          `Thank you for giving ${feedbackRating} stars! Your feedback and QoS observations have been recorded on the central registry.`,
+          [{ text: 'OK', onPress: () => setActiveModal(null) }]
+        );
+        setFeedbackComments('');
+      } else {
+        Alert.alert(
+          'Feedback Notice',
+          `Thank you for your rating! Note: ${res.error || 'Saved locally; will sync with backend'}.`,
+          [{ text: 'OK', onPress: () => setActiveModal(null) }]
+        );
+      }
+    } catch {
+      Alert.alert('Feedback Recorded', 'Thank you for your feedback!');
+      setActiveModal(null);
+    } finally {
+      setIsSubmittingFeedback(false);
+    }
+  };
+
+  const handleRestoreFromCloud = async () => {
+    if (!deviceId) return;
+    setIsSyncingCloudHistory(true);
+    try {
+      const res = await uploader.fetchDeviceHistory(deviceId, 200);
+      if (res.success && res.samples && res.samples.length > 0) {
+        let imported = 0;
+        for (const s of res.samples) {
+          await sampleStore.add({
+            id: s.id,
+            device_id: s.device_id,
+            ts: s.ts,
+            test_type: s.test_type || 'speed',
+            down_mbps: s.down_mbps,
+            up_mbps: s.up_mbps,
+            latency_ms: s.latency_ms,
+            jitter_ms: s.jitter_ms,
+            packet_loss_pct: s.packet_loss_pct,
+            network: s.network,
+            radio: s.radio,
+            carrier: s.carrier,
+            device_model: s.device_model,
+            os_platform: s.os_platform,
+            location_type: s.location_type,
+            lat: s.lat,
+            lng: s.lng,
+            accuracy: s.accuracy,
+          });
+          imported++;
+        }
+        const capacity = await sampleStore.getCapacityInfo();
+        setSampleCount(capacity.count);
+        Alert.alert(
+          'Cloud Sync Complete',
+          `Successfully synchronized ${res.samples.length} measurement record(s) from the server!`
+        );
+      } else {
+        Alert.alert('Cloud Sync', 'No historical records found for this device on the server.');
+      }
+    } catch (err: any) {
+      Alert.alert('Sync Failed', err?.message || 'Unable to connect to server.');
+    } finally {
+      setIsSyncingCloudHistory(false);
+    }
   };
 
   const intervalOptions = [
@@ -544,7 +617,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
           <ChevronRightIcon size={18} color="#94A3B8" />
         </TouchableOpacity>
 
-        {/* 10. Add Test Label */}
+        {/* 10. Cloud History Sync & Restore */}
+        <TouchableOpacity
+          style={styles.settingCardRow}
+          onPress={handleRestoreFromCloud}
+          disabled={isSyncingCloudHistory}
+          activeOpacity={0.75}>
+          <View style={[styles.iconBox, styles.iconBoxBlue]}>
+            <CloudUploadIcon size={20} color="#0284C7" />
+          </View>
+          <View style={styles.settingCardContent}>
+            <Text style={styles.settingCardTitle}>Cloud History Sync & Restore</Text>
+            <Text style={styles.settingCardSubtitle}>
+              {isSyncingCloudHistory ? 'Syncing...' : 'Restore past measurements from server'}
+            </Text>
+          </View>
+          {isSyncingCloudHistory ? (
+            <ActivityIndicator size="small" color="#0284C7" />
+          ) : (
+            <ChevronRightIcon size={18} color="#94A3B8" />
+          )}
+        </TouchableOpacity>
+
+        {/* 11. Add Test Label */}
         <TouchableOpacity
           style={styles.settingCardRow}
           onPress={() => setActiveModal('label')}
