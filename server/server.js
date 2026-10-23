@@ -103,7 +103,7 @@ app.get('/v1/locations/search', (req, res) => {
   const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=in&q=${encodeURIComponent(query)}&limit=5`;
   const options = {
     headers: {
-      'User-Agent': 'TRAI-MySpeed-Monitor/2.0 (contact@hareandturtle.ai)',
+      'User-Agent': 'NetSpeed QoS Monitor (info@handt.ai)',
     },
   };
 
@@ -140,7 +140,7 @@ app.get('/v1/locations/reverse', (req, res) => {
   const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}`;
   const options = {
     headers: {
-      'User-Agent': 'TRAI-MySpeed-Monitor/2.0 (contact@hareandturtle.ai)',
+      'User-Agent': 'NetSpeed QoS Monitor (info@handt.ai)',
       'Accept-Language': 'en',
     },
   };
@@ -311,8 +311,12 @@ app.get('/v1/crowdsource/map', async (req, res) => {
   const params = [];
 
   if (opFilter && opFilter.toLowerCase() !== 'all') {
-    conditions.push('LOWER(carrier) LIKE ?');
-    params.push(`%${opFilter.toLowerCase()}%`);
+    if (opFilter.toLowerCase() === 'wifi') {
+      conditions.push('(LOWER(network) = "wifi" OR LOWER(radio) LIKE "%wi-fi%" OR LOWER(carrier) LIKE "%wifi%")');
+    } else {
+      conditions.push('LOWER(carrier) LIKE ?');
+      params.push(`%${opFilter.toLowerCase()}%`);
+    }
   }
 
   if (techFilter && techFilter.toLowerCase() !== 'all') {
