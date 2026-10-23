@@ -58,7 +58,7 @@ export async function reverseGeocode(
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`,
       {
         headers: {
-          'User-Agent': 'NetSpeedMonitorTRAI/1.0',
+          'User-Agent': 'NetSpeed QoS Monitor (info@handt.ai)',
           'Accept-Language': 'en',
         },
         signal: controller.signal,

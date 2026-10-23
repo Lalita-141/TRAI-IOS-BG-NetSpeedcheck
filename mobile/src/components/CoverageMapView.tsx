@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -73,6 +73,79 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
   const [activeDropdown, setActiveDropdown] = useState<DropdownType>(null);
   const [mapType, setMapType] = useState<MapType>('map');
   const [isSearching, setIsSearching] = useState(false);
+  const [crowdsourcedSamples, setCrowdsourcedSamples] = useState<any[]>([]);
+  const [isLiveLoading, setIsLiveLoading] = useState(false);
+
+  // Fetch live crowdsourced samples from backend MySQL DB (/v1/crowdsource/map)
+  const fetchCrowdsourcedData = useCallback(
+    async (
+      operator: OperatorType = selectedOperator,
+      tech: TechnologyType = selectedTech,
+      metric: MetricType = selectedMetric
+    ) => {
+      try {
+        setIsLiveLoading(true);
+        const config = await getConfig();
+        const serverUrl = config.serverUrl.replace(/\/+$/, '');
+
+        const opQuery =
+          operator === 'BSNL & MTNL'
+            ? 'BSNL'
+            : operator === 'WIFI'
+            ? 'wifi'
+            : operator;
+
+        const params = new URLSearchParams({
+          operator: opQuery,
+          technology: tech,
+          metric: metric,
+          limit: '1000',
+        });
+
+        const res = await fetch(`${serverUrl}/v1/crowdsource/map?${params.toString()}`, {
+          headers: { Accept: 'application/json' },
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            const mapped = data.map((d: any) => ({
+              lat: d.lat,
+              lng: d.lng,
+              down: d.down_mbps || 0,
+              up: d.up_mbps || 0,
+              ping: d.latency_ms || 0,
+              jitter: d.jitter_ms || 0,
+              carrier: d.carrier || 'Unknown',
+              tech: d.radio || 'Mobile',
+              ts: d.ts,
+              rating: d.rating,
+              color: d.color,
+              isCrowdsourced: true,
+            }));
+            setCrowdsourcedSamples(mapped);
+
+            // Dynamically inject into WebView without reloading
+            webViewRef.current?.injectJavaScript(
+              `if (window.updateCrowdsourceSamples) { window.updateCrowdsourceSamples(${JSON.stringify(
+                mapped
+              )}); } true;`
+            );
+          }
+        }
+      } catch (err) {
+        console.warn('[CoverageMapView] Failed to fetch live crowdsourced map points:', err);
+      } finally {
+        setIsLiveLoading(false);
+      }
+    },
+    [selectedOperator, selectedTech, selectedMetric]
+  );
+
+  // Fetch live crowdsource points on mount
+  useEffect(() => {
+    fetchCrowdsourcedData();
+  }, [fetchCrowdsourcedData]);
 
   // Compute map center
   const defaultCenter = useMemo(() => {
@@ -104,6 +177,11 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
         })),
     [samples]
   );
+
+  // Combine local device test samples with server crowdsourced test samples
+  const allSamples = useMemo(() => {
+    return [...validSamples, ...crowdsourcedSamples];
+  }, [validSamples, crowdsourcedSamples]);
 
   // Handle Search Location
   const handleSearch = useCallback(async () => {
@@ -173,6 +251,7 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
     webViewRef.current?.injectJavaScript(
       `window.flyToLocation(${defaultCenter.lat}, ${defaultCenter.lng}, 12); true;`
     );
+    fetchCrowdsourcedData();
     if (onRefresh) onRefresh();
   };
 
@@ -184,24 +263,27 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
     webViewRef.current?.injectJavaScript('window.zoomOut(); true;');
   };
 
-  // Push filter update to WebView
+  // Push filter update to WebView and trigger crowdsource fetch
   const handleSelectOption = (type: DropdownType, option: string) => {
+    let newMetric = selectedMetric;
+    let newTech = selectedTech;
+    let newOp = selectedOperator;
+
     if (type === 'metric') {
-      setSelectedMetric(option as MetricType);
-      webViewRef.current?.injectJavaScript(
-        `window.updateFilters('${selectedOperator}', '${selectedTech}', '${option}'); true;`
-      );
+      newMetric = option as MetricType;
+      setSelectedMetric(newMetric);
     } else if (type === 'technology') {
-      setSelectedTech(option as TechnologyType);
-      webViewRef.current?.injectJavaScript(
-        `window.updateFilters('${selectedOperator}', '${option}', '${selectedMetric}'); true;`
-      );
+      newTech = option as TechnologyType;
+      setSelectedTech(newTech);
     } else if (type === 'operator') {
-      setSelectedOperator(option as OperatorType);
-      webViewRef.current?.injectJavaScript(
-        `window.updateFilters('${option}', '${selectedTech}', '${selectedMetric}'); true;`
-      );
+      newOp = option as OperatorType;
+      setSelectedOperator(newOp);
     }
+
+    webViewRef.current?.injectJavaScript(
+      `window.updateFilters('${newOp}', '${newTech}', '${newMetric}'); true;`
+    );
+    fetchCrowdsourcedData(newOp, newTech, newMetric);
     setActiveDropdown(null);
   };
 
@@ -314,7 +396,7 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
     var currentOperator = '${selectedOperator}';
     var currentTech = '${selectedTech}';
     var currentMetric = '${selectedMetric}';
-    var userSamples = ${JSON.stringify(validSamples)};
+    var userSamples = ${JSON.stringify(allSamples)};
 
     // Initialize Leaflet Map
     var map = L.map('map', {
@@ -480,14 +562,21 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
             speedDown = Math.round(matchingSample.down * 10) / 10;
             speedUp = Math.round(matchingSample.up * 10) / 10;
             latency = Math.round(matchingSample.ping);
-            if (speedDown >= 50) {
-              rating = 'Excellent'; color = COLOR_EXCELLENT; badgeClass = 'badge-excellent';
-            } else if (speedDown >= 25) {
-              rating = 'Better'; color = COLOR_BETTER; badgeClass = 'badge-better';
-            } else if (speedDown >= 10) {
-              rating = 'Good'; color = COLOR_GOOD; badgeClass = 'badge-good';
+            if (currentMetric === 'Latency') {
+              if (latency < 25) { rating = 'Excellent'; color = COLOR_EXCELLENT; badgeClass = 'badge-excellent'; }
+              else if (latency < 50) { rating = 'Better'; color = COLOR_BETTER; badgeClass = 'badge-better'; }
+              else if (latency < 100) { rating = 'Good'; color = COLOR_GOOD; badgeClass = 'badge-good'; }
+              else { rating = 'Poor'; color = COLOR_POOR; badgeClass = 'badge-poor'; }
+            } else if (currentMetric === 'Upload') {
+              if (speedUp >= 20) { rating = 'Excellent'; color = COLOR_EXCELLENT; badgeClass = 'badge-excellent'; }
+              else if (speedUp >= 10) { rating = 'Better'; color = COLOR_BETTER; badgeClass = 'badge-better'; }
+              else if (speedUp >= 5) { rating = 'Good'; color = COLOR_GOOD; badgeClass = 'badge-good'; }
+              else { rating = 'Poor'; color = COLOR_POOR; badgeClass = 'badge-poor'; }
             } else {
-              rating = 'Poor'; color = COLOR_POOR; badgeClass = 'badge-poor';
+              if (speedDown >= 50) { rating = 'Excellent'; color = COLOR_EXCELLENT; badgeClass = 'badge-excellent'; }
+              else if (speedDown >= 25) { rating = 'Better'; color = COLOR_BETTER; badgeClass = 'badge-better'; }
+              else if (speedDown >= 10) { rating = 'Good'; color = COLOR_GOOD; badgeClass = 'badge-good'; }
+              else { rating = 'Poor'; color = COLOR_POOR; badgeClass = 'badge-poor'; }
             }
           }
 
@@ -503,6 +592,10 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
           });
 
           var techLabel = currentTech === 'All' ? '5G / 4G' : currentTech;
+          var isCloudData = matchingSample && matchingSample.isCrowdsourced;
+          var sourceBadge = isCloudData
+            ? 'Live TRAI Crowdsourced'
+            : (matchingSample ? 'My Measured Test' : currentOperator + ' Verified Grid');
           var popupContent =
             '<div class="popup-container">' +
               '<div class="popup-header">' +
@@ -514,7 +607,7 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
               '<div class="popup-row"><span>Latency:</span><span class="popup-val">' + latency + ' ms</span></div>' +
               '<div class="popup-row"><span>Technology:</span><span class="popup-val">' + techLabel + '</span></div>' +
               '<div class="popup-op">' +
-                '<span>&#9679;</span> ' + currentOperator + ' Verified Grid' +
+                '<span>&#9679;</span> ' + sourceBadge +
               '</div>' +
             '</div>';
 
@@ -559,6 +652,16 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
       });
     }
 
+    // Dynamic update for cloud crowdsource data without reloading webview
+    window.updateCrowdsourceSamples = function(newSamples) {
+      if (Array.isArray(newSamples)) {
+        var localPersonal = userSamples.filter(function(s) { return !s.isCrowdsourced; });
+        userSamples = localPersonal.concat(newSamples);
+        renderHexagons();
+        renderUserSamplePins();
+      }
+    };
+
     // Dynamic Filter Handler (called from React Native without reloading)
     window.updateFilters = function(operator, tech, metric) {
       currentOperator = operator;
@@ -574,13 +677,21 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
 </body>
 </html>
     `;
-  }, [defaultCenter, selectedOperator, selectedTech, selectedMetric, validSamples]);
+  }, [defaultCenter, selectedOperator, selectedTech, selectedMetric, allSamples]);
 
   return (
     <View style={styles.container}>
-      {/* 1. Map Title */}
+      {/* 1. Map Title & Live Cloud Status */}
       <View style={styles.headerRow}>
         <Text style={styles.screenTitle}>Map</Text>
+        {crowdsourcedSamples.length > 0 && (
+          <View style={styles.liveCloudBadge}>
+            <View style={styles.liveCloudDot} />
+            <Text style={styles.liveCloudText}>
+              {crowdsourcedSamples.length} Live Cloud Tests
+            </Text>
+          </View>
+        )}
       </View>
 
       {/* 2. Search Bar */}
@@ -864,6 +975,31 @@ const styles = StyleSheet.create({
   },
   headerRow: {
     marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  liveCloudBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 14,
+  },
+  liveCloudDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10B981',
+    marginRight: 6,
+  },
+  liveCloudText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#065F46',
   },
   screenTitle: {
     fontSize: 22,
