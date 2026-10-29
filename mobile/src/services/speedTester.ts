@@ -253,8 +253,8 @@ export class SpeedTester {
           radio = details.cellularGeneration.toUpperCase();
         }
         if (!carrier || carrier === '--') {
-          const isp = await resolvePublicISP(true);
-          carrier = isp || (radio ? `${radio} Mobile` : 'Cellular');
+          // Public-IP ISP lookup is the last real source; otherwise carrier stays unknown (null)
+          carrier = (await resolvePublicISP(true)) || null;
         }
       } else if (state.type === NetInfoStateType.ethernet) {
         network = 'ethernet';
@@ -268,8 +268,9 @@ export class SpeedTester {
 
     return {
       network,
-      radio: radio || (network === 'wifi' ? 'Wi-Fi' : 'Cellular'),
-      carrier: carrier && carrier !== '--' ? carrier : (network === 'wifi' ? 'Wi-Fi' : 'Cellular'),
+      // Unknown radio/carrier stays null rather than a placeholder label
+      radio: radio || null,
+      carrier: carrier && carrier !== '--' ? carrier : null,
       isConnected,
     };
   }

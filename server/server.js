@@ -271,6 +271,13 @@ app.post('/v1/speed-samples', async (req, res) => {
     s.signal_quality ?? null,
     s.cell_tower ?? null,
     s.frequency_band ?? null,
+    s.measurement_source ?? null,
+    s.quality_category ?? null,
+    s.failure_reason ?? null,
+    s.link_quality ?? null,
+    s.location_ts ?? null,
+    s.speed_mps ?? null,
+    s.session_id ?? null,
   ]);
 
   try {
@@ -282,7 +289,8 @@ app.post('/v1/speed-samples', async (req, res) => {
         device_model, os_platform, location_type, lat, lng, accuracy,
         video_delay_ms, web_delay_ms, page_load_sec, ttfb_ms,
         streaming_quality, buffering_rate, signal_dbm, signal_quality,
-        cell_tower, frequency_band
+        cell_tower, frequency_band, measurement_source, quality_category,
+        failure_reason, link_quality, location_ts, speed_mps, session_id
       ) VALUES ?
     `;
     await pool.query(insertSql, [rows]);
@@ -332,7 +340,8 @@ app.get('/v1/crowdsource/map', async (req, res) => {
   const sql = `
     SELECT id, device_id, ts, down_mbps, up_mbps, latency_ms, jitter_ms,
            packet_loss_pct, network, radio, carrier, signal_dbm, signal_quality,
-           lat, lng, accuracy, test_type
+           lat, lng, accuracy, test_type, measurement_source, quality_category,
+           failure_reason
     FROM samples
     WHERE ${conditions.join(' AND ')}
     ORDER BY ts DESC
@@ -370,8 +379,10 @@ app.get('/v1/crowdsource/map', async (req, res) => {
         else { rating = 'Poor'; color = '#EF4444'; }
       } else {
         // Coverage / Signal dBm (Default)
-        metricValue = r.signal_dbm != null ? r.signal_dbm : (r.down_mbps && r.down_mbps > 25 ? -82 : -96);
-        if (metricValue >= -85) { rating = 'Excellent'; color = '#10B981'; }
+        // Only genuinely measured RF values are rated; never derive dBm from speed.
+        metricValue = r.signal_dbm != null ? r.signal_dbm : null;
+        if (metricValue == null) { rating = 'Not measured'; color = '#94A3B8'; }
+        else if (metricValue >= -85) { rating = 'Excellent'; color = '#10B981'; }
         else if (metricValue >= -95) { rating = 'Better'; color = '#06B6D4'; }
         else if (metricValue >= -105) { rating = 'Good'; color = '#F59E0B'; }
         else { rating = 'Poor'; color = '#EF4444'; }
@@ -388,6 +399,9 @@ app.get('/v1/crowdsource/map', async (req, res) => {
         latency_ms: r.latency_ms,
         signal_dbm: r.signal_dbm,
         test_type: r.test_type,
+        measurement_source: r.measurement_source,
+        quality_category: r.quality_category,
+        failure_reason: r.failure_reason,
         ts: r.ts,
         metric: metric,
         metric_value: metricValue,

@@ -15,15 +15,33 @@ import {
   PinIcon,
 } from './Icons';
 import { MonitorStatus } from '../services/monitorService';
+import { locationService } from '../services/locationService';
+import { testCoordinator } from '../services/testCoordinator';
+import { measureCoverage } from '../services/coverageSurvey';
+import { getConfig } from '../config';
+import { ExperienceCategory, EXPERIENCE_LABELS } from '../config/coverageThresholds';
 
+/**
+ * Result of one Network Experience Coverage measurement. Every value here is
+ * measured; RF fields (signalDbm, cellTower, frequencyBand) stay null because
+ * no public API used by this app reads modem RF values.
+ */
 export interface CoverageTestResults {
-  signalDbm: number;
-  signalQuality: string;
-  radioTech: string;
-  carrierName: string;
-  gpsAccuracy: number;
-  cellTower: string;
-  frequencyBand: string;
+  experience: ExperienceCategory;
+  network: string;
+  radioTech: string | null;
+  carrierName: string | null;
+  downMbps: number | null;
+  latencyMs: number | null;
+  jitterMs: number | null;
+  packetLossPct: number | null;
+  lat: number | null;
+  lng: number | null;
+  gpsAccuracy: number | null;
+  failureReason: string | null;
+  signalDbm: number | null;
+  cellTower: string | null;
+  frequencyBand: string | null;
 }
 
 interface CoverageTestProgressViewProps {
@@ -33,13 +51,16 @@ interface CoverageTestProgressViewProps {
 }
 
 export const CoverageTestProgressView: React.FC<CoverageTestProgressViewProps> = ({
-  status,
   onCancel,
   onComplete,
 }) => {
-  const [phase, setPhase] = useState<'rf' | 'gps' | 'done'>('rf');
-  const [measuredDbm, setMeasuredDbm] = useState<number | null>(null);
-  const [cellSector, setCellSector] = useState<string | null>(null);
+  const [phase, setPhase] = useState<'network' | 'gps' | 'done'>('network');
+  const [latencyMs, setLatencyMs] = useState<number | null>(null);
+  const [downMbps, setDownMbps] = useState<number | null>(null);
+  const [radioTech, setRadioTech] = useState<string | null>(null);
+  const [carrierName, setCarrierName] = useState<string | null>(null);
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
+  const [statusText, setStatusText] = useState('Reading network state');
 
   // Pulse animation for radar rings
   const pulseAnim = useRef(new Animated.Value(0)).current;
@@ -55,61 +76,74 @@ export const CoverageTestProgressView: React.FC<CoverageTestProgressViewProps> =
     ).start();
   }, [pulseAnim]);
 
-  const last = status.lastSample;
-  const isWifi = last?.network === 'wifi';
-  const baseDbm = isWifi ? -58 : last?.accuracy && last.accuracy < 15 ? -86 : -96;
-  const radioTech = last?.radio || (isWifi ? 'Wi-Fi 5GHz' : '5G NSA');
-  const carrierName =
-    last?.carrier && last.carrier !== '--' && last.carrier !== 'wifi'
-      ? last.carrier
-      : isWifi
-      ? 'Airtel Broadband'
-      : 'Jio 5G';
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
 
-  // Sequence runner
-  const completedRef = useRef(false);
   useEffect(() => {
     let isMounted = true;
 
     const runSequence = async () => {
-      // Phase 1: RF Signal Evaluation
-      setPhase('rf');
-      await new Promise(resolve => setTimeout(() => resolve(undefined), 1000));
+      const appConfig = await getConfig();
+      const m = await testCoordinator.run('manual', () =>
+        measureCoverage({
+          serverUrl: appConfig.serverUrl,
+          getLocation: () => locationService.getCurrentLocation(),
+          onProgress: p => {
+            if (!isMounted) return;
+            if (p.stage === 'network') {
+              if (p.radio !== undefined) setRadioTech(p.radio);
+              if (p.carrier !== undefined) setCarrierName(p.carrier);
+            } else if (p.stage === 'latency') {
+              setStatusText('Measuring latency');
+              if (p.latencyMs !== undefined) setLatencyMs(p.latencyMs);
+            } else if (p.stage === 'throughput') {
+              setStatusText('Measuring throughput');
+              if (p.downMbps !== undefined) setDownMbps(p.downMbps);
+            } else {
+              setPhase('gps');
+              setStatusText('Resolving GPS location');
+              if (p.location) {
+                setGpsAccuracy(
+                  p.location.accuracy != null ? Math.round(p.location.accuracy) : null
+                );
+              }
+            }
+          },
+        })
+      );
       if (!isMounted) return;
 
-      setMeasuredDbm(baseDbm);
-
-      await new Promise(resolve => setTimeout(() => resolve(undefined), 1000));
-      if (!isMounted) return;
-
-      // Phase 2: Cell & GPS resolution
-      setPhase('gps');
-      await new Promise(resolve => setTimeout(() => resolve(undefined), 1000));
-      if (!isMounted) return;
-      setCellSector(isWifi ? 'Access Point 5G' : 'Cell Sector 4 (eNodeB)');
-
-      await new Promise(resolve => setTimeout(() => resolve(undefined), 1200));
-      if (!isMounted || completedRef.current) return;
-      completedRef.current = true;
+      const results: CoverageTestResults = {
+        experience: m.experience,
+        network: m.network,
+        radioTech: m.radio,
+        carrierName: m.carrier,
+        downMbps: m.downMbps,
+        latencyMs: m.latencyMs,
+        jitterMs: m.jitterMs,
+        packetLossPct: m.packetLossPct,
+        lat: m.location.lat,
+        lng: m.location.lng,
+        gpsAccuracy: m.location.accuracy != null ? Math.round(m.location.accuracy) : null,
+        failureReason: m.failureReason,
+        signalDbm: null,
+        cellTower: null,
+        frequencyBand: null,
+      };
       setPhase('done');
-
-      onComplete({
-        signalDbm: baseDbm,
-        signalQuality: baseDbm > -80 ? 'Excellent' : baseDbm > -95 ? 'Good' : 'Fair',
-        radioTech,
-        carrierName,
-        gpsAccuracy: Math.round(last?.accuracy || 8),
-        cellTower: isWifi ? 'Indoor AP - Gateway' : `${carrierName.toUpperCase()} - Sector 04`,
-        frequencyBand: isWifi ? '5.2 GHz (Ch 44)' : 'Band 40 (2300 MHz)',
-      });
+      setStatusText(EXPERIENCE_LABELS[results.experience]);
+      onCompleteRef.current(results);
     };
 
-    runSequence();
+    runSequence().catch(err => {
+      console.warn('Coverage measurement failed:', err);
+      if (isMounted) setStatusText('Measurement failed');
+    });
 
     return () => {
       isMounted = false;
     };
-  }, [baseDbm, isWifi, radioTech, carrierName, last?.accuracy, onComplete]);
+  }, []);
 
   const pulseScale = pulseAnim.interpolate({
     inputRange: [0, 1],
@@ -128,11 +162,11 @@ export const CoverageTestProgressView: React.FC<CoverageTestProgressViewProps> =
         <TouchableOpacity style={styles.backBtn} onPress={onCancel} activeOpacity={0.7}>
           <BackArrowIcon size={22} color="#0F172A" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Coverage Test</Text>
+        <Text style={styles.headerTitle}>Network Experience Test</Text>
         <View style={styles.headerRightSpacer} />
       </View>
 
-      {/* Stepper Bar: RF Signal -> Cell & GPS */}
+      {/* Stepper Bar: Network -> GPS */}
       <View style={styles.stepperContainer}>
         <View style={styles.stepperLineTrack}>
           <View
@@ -143,22 +177,22 @@ export const CoverageTestProgressView: React.FC<CoverageTestProgressViewProps> =
           />
         </View>
 
-        {/* Step 1: RF Signal */}
+        {/* Step 1: Network performance */}
         <View style={styles.stepItem}>
           <View
             style={[
               styles.stepCircle,
-              phase === 'rf' ? styles.stepCircleActive : styles.stepCircleDone,
+              phase === 'network' ? styles.stepCircleActive : styles.stepCircleDone,
             ]}>
             <SignalBarsIcon size={20} color="#0F172A" />
           </View>
-          <Text style={styles.stepLabel}>RF Signal</Text>
+          <Text style={styles.stepLabel}>Network</Text>
           <Text style={styles.stepValue}>
-            {measuredDbm != null ? `${measuredDbm} dBm` : 'Scanning...'}
+            {latencyMs != null ? `${latencyMs} ms` : phase === 'network' ? 'Measuring...' : '--'}
           </Text>
         </View>
 
-        {/* Step 2: Cell & GPS */}
+        {/* Step 2: GPS */}
         <View style={styles.stepItem}>
           <View
             style={[
@@ -174,27 +208,23 @@ export const CoverageTestProgressView: React.FC<CoverageTestProgressViewProps> =
               color={phase === 'gps' || phase === 'done' ? '#0F172A' : '#94A3B8'}
             />
           </View>
-          <Text style={styles.stepLabel}>Cell & GPS</Text>
+          <Text style={styles.stepLabel}>GPS</Text>
           <Text style={styles.stepValue}>
-            {cellSector != null ? 'Locked' : phase === 'gps' ? 'Resolving...' : '--'}
+            {gpsAccuracy != null ? `±${gpsAccuracy} m` : phase === 'gps' ? 'Resolving...' : '--'}
           </Text>
         </View>
       </View>
 
-      {/* Center Radar / Signal Card */}
+      {/* Center Measurement Card */}
       <View style={styles.radarCard}>
-        {/* Top Header of Card */}
         <View style={styles.radarTopBar}>
           <View style={styles.qualityPill}>
             <View style={styles.qualityDot} />
-            <Text style={styles.qualityText}>
-              {phase === 'rf' ? 'Scanning RF Spectrum' : 'Locking Cell Sector'}
-            </Text>
+            <Text style={styles.qualityText}>{statusText}</Text>
           </View>
-          <Text style={styles.radarSubText}>{radioTech}</Text>
+          <Text style={styles.radarSubText}>{radioTech ?? '--'}</Text>
         </View>
 
-        {/* Central Signal Dial Visual */}
         <View style={styles.radarCenterVisual}>
           <Animated.View
             style={[
@@ -207,24 +237,20 @@ export const CoverageTestProgressView: React.FC<CoverageTestProgressViewProps> =
           />
           <View style={styles.radarInnerCircle}>
             <CoverageTestIcon size={34} color="#00A389" />
-            <Text style={styles.radarDbmValue}>{baseDbm}</Text>
-            <Text style={styles.radarDbmUnit}>dBm</Text>
+            <Text style={styles.radarDbmValue}>{downMbps != null ? downMbps.toFixed(1) : '--'}</Text>
+            <Text style={styles.radarDbmUnit}>Mbps</Text>
           </View>
         </View>
 
-        {/* Status Pill */}
         <View style={styles.signalStatusBadge}>
-          <Text style={styles.signalStatusText}>
-            {baseDbm > -80 ? 'EXCELLENT SIGNAL' : 'GOOD COVERAGE'}
-          </Text>
+          <Text style={styles.signalStatusText}>NETWORK EXPERIENCE · NOT RF SIGNAL</Text>
         </View>
 
-        {/* Bottom Scrubber Track */}
         <View style={styles.radarScrubberTrack}>
           <View
             style={[
               styles.radarScrubberFill,
-              phase === 'rf'
+              phase === 'network'
                 ? styles.scrubberRf
                 : phase === 'gps'
                 ? styles.scrubberGps
@@ -234,28 +260,26 @@ export const CoverageTestProgressView: React.FC<CoverageTestProgressViewProps> =
         </View>
       </View>
 
-      {/* Real-time Spectrum Details Card */}
+      {/* Live Details Card */}
       <View style={styles.detailsCard}>
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Network Carrier</Text>
-          <Text style={styles.detailValue}>{carrierName}</Text>
+          <Text style={styles.detailValue}>{carrierName ?? 'Unknown'}</Text>
         </View>
         <View style={styles.detailDivider} />
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Radio Access Tech</Text>
-          <Text style={styles.detailValue}>{radioTech}</Text>
+          <Text style={styles.detailValue}>{radioTech ?? '--'}</Text>
         </View>
         <View style={styles.detailDivider} />
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>GPS Accuracy</Text>
-          <Text style={styles.detailValue}>±{Math.round(last?.accuracy || 8)} m</Text>
+          <Text style={styles.detailValue}>{gpsAccuracy != null ? `±${gpsAccuracy} m` : '--'}</Text>
         </View>
         <View style={styles.detailDivider} />
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Current Status</Text>
-          <Text style={[styles.detailValue, styles.statusAccent]}>
-            {phase === 'rf' ? 'Evaluating RF Signal' : 'Resolving Cell Location'}
-          </Text>
+          <Text style={[styles.detailValue, styles.statusAccent]}>{statusText}</Text>
         </View>
       </View>
     </SafeAreaView>

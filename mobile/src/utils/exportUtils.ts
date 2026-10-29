@@ -23,6 +23,17 @@ export function generateCSV(samples: Sample[]): string {
     'GPS_Accuracy_m',
     'Device_Model',
     'OS_Platform',
+    'Test_Type',
+    'Measurement_Source',
+    'Experience_Category',
+    'Failure_Reason',
+    'Link_Quality',
+    'RF_Signal_dBm',
+    'Cell_Tower',
+    'Frequency_Band',
+    'Location_Timestamp',
+    'GPS_Speed_mps',
+    'Session_ID',
   ];
 
   const escapeCSV = (val: any): string => {
@@ -47,13 +58,25 @@ export function generateCSV(samples: Sample[]): string {
       escapeCSV(s.up_mbps != null ? s.up_mbps.toFixed(2) : ''),
       escapeCSV(s.latency_ms != null ? s.latency_ms.toFixed(1) : ''),
       escapeCSV(s.jitter_ms != null ? s.jitter_ms.toFixed(1) : ''),
-      escapeCSV(s.packet_loss_pct != null ? s.packet_loss_pct : '0'),
+      escapeCSV(s.packet_loss_pct != null ? s.packet_loss_pct : ''),
       escapeCSV(s.location_type || ''),
       escapeCSV(s.lat != null ? s.lat.toFixed(6) : ''),
       escapeCSV(s.lng != null ? s.lng.toFixed(6) : ''),
       escapeCSV(s.accuracy != null ? s.accuracy.toFixed(1) : ''),
       escapeCSV(s.device_model || ''),
       escapeCSV(s.os_platform || ''),
+      escapeCSV(s.test_type || ''),
+      escapeCSV(s.measurement_source || ''),
+      escapeCSV(s.quality_category || ''),
+      escapeCSV(s.failure_reason || ''),
+      escapeCSV(s.link_quality || ''),
+      // RF columns are blank unless genuinely measured
+      escapeCSV(s.signal_dbm ?? ''),
+      escapeCSV(s.cell_tower || ''),
+      escapeCSV(s.frequency_band || ''),
+      escapeCSV(s.location_ts ?? ''),
+      escapeCSV(s.speed_mps ?? ''),
+      escapeCSV(s.session_id || ''),
     ].join(',');
   });
 

@@ -72,8 +72,11 @@ export interface MapPoint {
   test_type?: string;
   ts: number;
   metric: string;
-  metric_value: number;
-  rating: 'Excellent' | 'Better' | 'Good' | 'Poor';
+  metric_value: number | null; // null when the selected metric was not measured (e.g. RF on iOS)
+  rating: 'Excellent' | 'Better' | 'Good' | 'Poor' | 'Not measured';
+  measurement_source?: string | null;
+  quality_category?: string | null;
+  failure_reason?: string | null;
   color: string;
 }
 

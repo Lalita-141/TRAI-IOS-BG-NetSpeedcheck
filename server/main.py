@@ -58,7 +58,25 @@ def db():
         ("packet_loss_pct", "REAL"),
         ("device_model", "TEXT"),
         ("os_platform", "TEXT"),
-        ("location_type", "TEXT")
+        ("location_type", "TEXT"),
+        ("test_type", "TEXT"),
+        ("video_delay_ms", "INTEGER"),
+        ("web_delay_ms", "INTEGER"),
+        ("page_load_sec", "REAL"),
+        ("ttfb_ms", "INTEGER"),
+        ("streaming_quality", "TEXT"),
+        ("buffering_rate", "TEXT"),
+        ("signal_dbm", "REAL"),
+        ("signal_quality", "TEXT"),
+        ("cell_tower", "TEXT"),
+        ("frequency_band", "TEXT"),
+        ("measurement_source", "TEXT"),
+        ("quality_category", "TEXT"),
+        ("failure_reason", "TEXT"),
+        ("link_quality", "TEXT"),
+        ("location_ts", "REAL"),
+        ("speed_mps", "REAL"),
+        ("session_id", "TEXT")
     ]:
         try:
             c.execute(f"ALTER TABLE samples ADD COLUMN {col} {col_type}")
@@ -125,10 +143,32 @@ class Sample(BaseModel):
     lat: float | None = None
     lng: float | None = None
     accuracy: float | None = None
+    # QoS, RF (null unless genuinely measured) and Network Experience fields
+    test_type: str | None = "speed"  # same default as server.js
+    video_delay_ms: float | None = None
+    web_delay_ms: float | None = None
+    page_load_sec: float | None = None
+    ttfb_ms: float | None = None
+    streaming_quality: str | None = None
+    buffering_rate: str | None = None
+    signal_dbm: float | None = None
+    signal_quality: str | None = None
+    cell_tower: str | None = None
+    frequency_band: str | None = None
+    measurement_source: str | None = None
+    quality_category: str | None = None
+    failure_reason: str | None = None
+    link_quality: str | None = None
+    location_ts: float | None = None
+    speed_mps: float | None = None
+    session_id: str | None = None
 
 
 class Batch(BaseModel):
     samples: list[Sample]
+
+
+SAMPLE_COLUMNS = ["id", "device_id", "ts", "down_mbps", "up_mbps", "latency_ms", "jitter_ms", "packet_loss_pct", "network", "radio", "carrier", "device_model", "os_platform", "location_type", "lat", "lng", "accuracy", "test_type", "video_delay_ms", "web_delay_ms", "page_load_sec", "ttfb_ms", "streaming_quality", "buffering_rate", "signal_dbm", "signal_quality", "cell_tower", "frequency_band", "measurement_source", "quality_category", "failure_reason", "link_quality", "location_ts", "speed_mps", "session_id"]
 
 
 @app.post("/v1/speed-samples")
@@ -137,14 +177,9 @@ def ingest(b: Batch):
     try:
         # INSERT OR IGNORE makes retries idempotent by sample id
         c.executemany(
-            """INSERT OR IGNORE INTO samples (
-                id, device_id, ts, down_mbps, up_mbps, latency_ms,
-                jitter_ms, packet_loss_pct, network, radio, carrier,
-                device_model, os_platform, location_type, lat, lng, accuracy
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            [(s.id, s.device_id, s.ts, s.down_mbps, s.up_mbps, s.latency_ms,
-              s.jitter_ms, s.packet_loss_pct, s.network, s.radio, s.carrier,
-              s.device_model, s.os_platform, s.location_type, s.lat, s.lng, s.accuracy) for s in b.samples])
+            f"INSERT OR IGNORE INTO samples ({', '.join(SAMPLE_COLUMNS)}) "
+            f"VALUES({', '.join('?' * len(SAMPLE_COLUMNS))})",
+            [tuple(getattr(s, col) for col in SAMPLE_COLUMNS) for s in b.samples])
         # Opportunistic cleanup: remove records older than 90 days
         cutoff_ts = time.time() - RETENTION_SECONDS
         cur = c.execute("DELETE FROM samples WHERE ts < ?", (cutoff_ts,))

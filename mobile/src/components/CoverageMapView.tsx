@@ -558,6 +558,9 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
             return dLat < r && dLng < r;
           });
 
+          // Only draw hexagons backed by a real measurement; never show synthetic coverage
+          if (!matchingSample) continue;
+
           if (matchingSample) {
             speedDown = Math.round(matchingSample.down * 10) / 10;
             speedUp = Math.round(matchingSample.up * 10) / 10;

@@ -1,5 +1,23 @@
-import Geolocation from '@react-native-community/geolocation';
+import Geolocation, { GeolocationResponse } from '@react-native-community/geolocation';
 import { GeoLocationResult } from '../types';
+
+function toResult(pos: GeolocationResponse): GeoLocationResult {
+  const speed = pos.coords.speed;
+  return {
+    lat: pos.coords.latitude,
+    lng: pos.coords.longitude,
+    accuracy: pos.coords.accuracy,
+    timestamp: pos.timestamp ?? null,
+    // Platforms report a negative speed when it is unknown
+    speed: speed != null && speed >= 0 ? speed : null,
+  };
+}
+
+export interface WatchOptions {
+  enableHighAccuracy?: boolean;
+  distanceFilter?: number; // metres
+  interval?: number; // ms (Android)
+}
 
 class LocationService {
   private initialized = false;
@@ -61,22 +79,14 @@ class LocationService {
       // First attempt with high accuracy
       Geolocation.getCurrentPosition(
         position => {
-          resolve({
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-            accuracy: position.coords.accuracy,
-          });
+          resolve(toResult(position));
         },
         error => {
           console.warn('High accuracy location failed, attempting low accuracy fallback', error);
           // Fallback with lower accuracy & shorter timeout
           Geolocation.getCurrentPosition(
             fallbackPos => {
-              resolve({
-                lat: fallbackPos.coords.latitude,
-                lng: fallbackPos.coords.longitude,
-                accuracy: fallbackPos.coords.accuracy,
-              });
+              resolve(toResult(fallbackPos));
             },
             fallbackErr => {
               console.warn('Location retrieval completely failed', fallbackErr);
@@ -90,23 +100,20 @@ class LocationService {
     });
   }
 
-  watchPosition(callback: (loc: GeoLocationResult) => void): number {
+  /** Defaults suit background monitoring; coverage surveys pass high-accuracy options. */
+  watchPosition(callback: (loc: GeoLocationResult) => void, options: WatchOptions = {}): number {
     this.init();
     return Geolocation.watchPosition(
       pos => {
-        callback({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          accuracy: pos.coords.accuracy,
-        });
+        callback(toResult(pos));
       },
       err => {
         console.warn('watchPosition error', err);
       },
       {
-        enableHighAccuracy: false,
-        distanceFilter: 50,
-        interval: 10000,
+        enableHighAccuracy: options.enableHighAccuracy ?? false,
+        distanceFilter: options.distanceFilter ?? 50,
+        interval: options.interval ?? 10000,
         fastestInterval: 5000,
       }
     );

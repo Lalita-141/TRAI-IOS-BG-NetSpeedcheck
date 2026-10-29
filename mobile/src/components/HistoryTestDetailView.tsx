@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Sample } from '../types';
+import { formatRfSignal } from '../config/coverageThresholds';
 import { reverseGeocode } from '../services/geocodeService';
 import { useTranslation } from '../i18n';
 import {
@@ -75,38 +76,29 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
     hour12: true,
   });
 
+  // Unmeasured values render as '--'; never substitute sample numbers.
   const downSpeed =
-    sample.down_mbps != null ? sample.down_mbps.toFixed(1) : '0.0';
+    sample.down_mbps != null ? sample.down_mbps.toFixed(1) : '--';
   const upSpeed =
-    sample.up_mbps != null ? sample.up_mbps.toFixed(1) : '0.0';
+    sample.up_mbps != null ? sample.up_mbps.toFixed(1) : '--';
   const latency =
-    sample.latency_ms != null ? Math.round(sample.latency_ms) : 0;
+    sample.latency_ms != null ? Math.round(sample.latency_ms) : '--';
   const packetLoss =
-    sample.packet_loss_pct != null ? `${sample.packet_loss_pct}%` : '0%';
+    sample.packet_loss_pct != null ? `${sample.packet_loss_pct}%` : '--';
   const jitter =
-    sample.jitter_ms != null ? `${sample.jitter_ms.toFixed(2)} ms` : '0.00 ms';
+    sample.jitter_ms != null ? `${sample.jitter_ms.toFixed(2)} ms` : '--';
 
   const carrier =
     sample.carrier && sample.carrier !== '--' && sample.carrier !== 'wifi'
       ? sample.carrier
-      : 'Airtel';
-  const radio = sample.network === 'wifi' ? 'Wi-Fi' : sample.radio || '4G';
+      : 'Unknown';
+  const radio = sample.network === 'wifi' ? 'Wi-Fi' : sample.radio || '--';
 
-  // Calculate coverage dBm
-  const coverageDbm =
-    sample.network === 'wifi'
-      ? '-58 dBm'
-      : (sample.down_mbps ?? 0) >= 50
-      ? '-72 dBm'
-      : (sample.down_mbps ?? 0) >= 20
-      ? '-88 dBm'
-      : '-101 dBm';
+  // RF signal is shown only when genuinely measured (never derived from speed)
+  const coverageDbm = formatRfSignal(sample.signal_dbm);
 
-  const shortTestId = sample.id ? sample.id.substring(0, 6) : 'c2';
-  const serverDisplay =
-    sample.network === 'wifi'
-      ? 'AIRTEL - Core Server'
-      : `${carrier.toUpperCase()} - Core Server`;
+  const shortTestId = sample.id ? sample.id.substring(0, 6) : '--';
+  const serverDisplay = 'Configured test server';
 
   const handleShare = async () => {
     try {

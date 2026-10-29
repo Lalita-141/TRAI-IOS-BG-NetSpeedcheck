@@ -7,8 +7,12 @@ import {
   View,
   RefreshControl,
   Alert,
+  Platform,
 } from 'react-native';
 import { AppConfig, Sample } from '../types';
+import { getDeviceId } from '../config';
+import { generateUUID } from '../utils/uuid';
+import { EXPERIENCE_LABELS } from '../config/coverageThresholds';
 import { sampleStore } from '../services/sampleStore';
 import { uploader } from '../services/uploader';
 import { SpeedGauge } from './SpeedGauge';
@@ -196,13 +200,12 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
   const radioTech = last?.radio || (last?.network === 'wifi' ? 'Wi-Fi' : '4G');
   const carrierPillText = `${carrierName}_${radioTech}`;
 
-  // Estimate signal dBm based on connection type
-  const calculatedDbm =
-    last?.network === 'wifi'
-      ? -58
-      : last?.accuracy && last.accuracy < 15
-        ? -88
-        : -101;
+  // Header pill shows measured network experience only (no estimated dBm)
+  const networkPillText = coverageResults
+    ? `Experience: ${EXPERIENCE_LABELS[coverageResults.experience]}`
+    : last?.latency_ms != null
+      ? `Latency: ${Math.round(last.latency_ms)} ms`
+      : 'Experience: Not measured';
 
   const handleStartCurrentTest = () => {
     if (activeTestType === 'speed') {
@@ -300,29 +303,36 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
       <CoverageTestProgressView
         status={status}
         onCancel={() => setScreenMode('home')}
-        onComplete={res => {
+        onComplete={async res => {
           setCoverageResults(res);
           setScreenMode('coverage_result');
-          const base = status.lastSample;
+          // Store exactly what was measured; unmeasured values stay null.
           const s: Sample = {
-            id: `cov_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            device_id: base?.device_id || 'dev',
+            id: generateUUID(),
+            device_id: await getDeviceId(),
             ts: Math.floor(Date.now() / 1000),
-            down_mbps: res.signalDbm ? Math.max(5, Math.round(120 + res.signalDbm)) : (base?.down_mbps || 24.5),
-            up_mbps: base?.up_mbps || 8.5,
-            latency_ms: base?.latency_ms || 35,
-            jitter_ms: 8.0,
-            packet_loss_pct: 0,
-            network: base?.network || 'cellular',
-            radio: res.radioTech || base?.radio || '4G',
-            carrier: res.carrierName || base?.carrier || 'Airtel',
-            device_model: base?.device_model || 'Mobile Device',
-            os_platform: base?.os_platform || 'Mobile OS',
-            location_type: base?.location_type || 'Outdoor',
-            lat: base?.lat ?? null,
-            lng: base?.lng ?? null,
-            accuracy: res.gpsAccuracy || base?.accuracy || null,
+            down_mbps: res.downMbps,
+            up_mbps: null,
+            latency_ms: res.latencyMs,
+            jitter_ms: res.jitterMs,
+            packet_loss_pct: res.packetLossPct,
+            network: res.network,
+            radio: res.radioTech,
+            carrier: res.carrierName,
+            device_model: Platform.OS === 'ios' ? 'Apple iPhone' : 'Android Device',
+            os_platform: `${Platform.OS} ${Platform.Version}`,
+            location_type: null,
+            lat: res.lat,
+            lng: res.lng,
+            accuracy: res.gpsAccuracy,
             test_type: 'coverage',
+            signal_dbm: res.signalDbm,
+            cell_tower: res.cellTower,
+            frequency_band: res.frequencyBand,
+            measurement_source:
+              Platform.OS === 'ios' ? 'ios_network_experience' : 'android_network_experience',
+            quality_category: res.experience,
+            failure_reason: res.failureReason,
           };
           sampleStore.add(s);
         }}
@@ -509,7 +519,7 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
 
           <View style={styles.coveragePill}>
             <SignalBarsIcon size={14} color="#10B981" />
-            <Text style={styles.coveragePillText}>{t('filter_coverage', 'Coverage')}: {calculatedDbm} dBm</Text>
+            <Text style={styles.coveragePillText}>{networkPillText}</Text>
           </View>
         </View>
 
@@ -770,7 +780,8 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
                 <View>
                   <Text style={styles.viewResultTitle}>Latest Coverage Result</Text>
                   <Text style={styles.viewResultSubtitle}>
-                    {coverageResults.signalDbm} dBm • {coverageResults.signalQuality} Signal
+                    {coverageResults.downMbps != null ? `${coverageResults.downMbps.toFixed(1)} Mbps` : '--'} •{' '}
+                    {EXPERIENCE_LABELS[coverageResults.experience]} Experience
                   </Text>
                 </View>
               </View>

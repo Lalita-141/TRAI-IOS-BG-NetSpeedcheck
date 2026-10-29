@@ -8,6 +8,7 @@ import {
   SafeAreaView,
 } from 'react-native';
 import { Sample } from '../types';
+import { formatRfSignal } from '../config/coverageThresholds';
 import { reverseGeocode } from '../services/geocodeService';
 import {
   BackArrowIcon,
@@ -56,19 +57,19 @@ export const SpeedTestResultView: React.FC<SpeedTestResultViewProps> = ({
     hour12: true,
   });
 
-  const downSpeed = sample?.down_mbps != null ? sample.down_mbps.toFixed(1) : '21.2';
-  const upSpeed = sample?.up_mbps != null ? sample.up_mbps.toFixed(1) : '1.5';
-  const latency = sample?.latency_ms != null ? Math.round(sample.latency_ms) : 73;
+  // Unmeasured values render as '--'; never substitute sample numbers.
+  const downSpeed = sample?.down_mbps != null ? sample.down_mbps.toFixed(1) : '--';
+  const upSpeed = sample?.up_mbps != null ? sample.up_mbps.toFixed(1) : '--';
+  const latency = sample?.latency_ms != null ? Math.round(sample.latency_ms) : '--';
   const packetLoss =
-    sample?.packet_loss_pct != null ? `${sample.packet_loss_pct}%` : '0%';
-  const jitter = sample?.jitter_ms != null ? `${sample.jitter_ms.toFixed(2)} ms` : '7.04 ms';
+    sample?.packet_loss_pct != null ? `${sample.packet_loss_pct}%` : '--';
+  const jitter = sample?.jitter_ms != null ? `${sample.jitter_ms.toFixed(2)} ms` : '--';
 
-  const carrier = sample?.carrier && sample.carrier !== '--' ? sample.carrier : 'Jio';
-  const radio = sample?.radio || (sample?.network === 'wifi' ? 'Wi-Fi' : '4G');
-  const coverageDbm = sample?.network === 'wifi' ? '-58 dBm' : '-101 dBm';
+  const carrier = sample?.carrier && sample.carrier !== '--' ? sample.carrier : 'Unknown';
+  const radio = sample?.radio || '--';
+  const coverageDbm = formatRfSignal(sample?.signal_dbm);
 
-  const serverDisplay =
-    carrier === 'Wi-Fi' ? 'TRAI Broadband Gateway - Mumbai' : `${carrier.toUpperCase()} - Core Server`;
+  const serverDisplay = 'Configured test server';
 
   return (
     <SafeAreaView style={styles.safeArea}>

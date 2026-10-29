@@ -13,10 +13,20 @@ import { uploader } from './uploader';
 import { speedTester } from './speedTester';
 import { locationService } from './locationService';
 import { measureVideoAndWeb, qualityForMbps } from './qosProbes';
+import {
+  COVERAGE_DOWNLOAD_MB,
+  coverageSampleFields,
+  isFreshLocation,
+  measureCoverage,
+} from './coverageSurvey';
+import { EXPERIENCE_LABELS } from '../config/coverageThresholds';
 import { testCoordinator, TestOwner } from './testCoordinator';
 import { monitorService } from './monitorService';
 
-export type ContinuousPhase = 'idle' | 'waiting' | 'testing' | 'gap';
+export type ContinuousPhase = 'idle' | 'waiting' | 'testing' | 'gap' | 'paused';
+
+// Default survey data budget; past it coverage cycles measure latency only.
+export const DEFAULT_COVERAGE_DATA_CAP_MB = 50;
 
 export interface ContinuousSessionState {
   active: boolean;
@@ -33,6 +43,10 @@ export interface ContinuousSessionState {
   cycles: CycleResult[]; // newest first
   lastResults: ContinuousTestSessionResults | null;
   resultsSeen: boolean;
+  paused: boolean;
+  pausedAt: number | null;
+  dataUsedMB: number; // throughput test payloads transferred this session
+  surveyId: string | null; // session_id stamped on every sample of this session
 }
 
 type SessionListener = (state: ContinuousSessionState) => void;
@@ -74,6 +88,10 @@ const INITIAL_STATE: ContinuousSessionState = {
   cycles: [],
   lastResults: null,
   resultsSeen: true,
+  paused: false,
+  pausedAt: null,
+  dataUsedMB: 0,
+  surveyId: null,
 };
 
 const formatMbps = (v: number | null | undefined) => (v != null ? `${v.toFixed(1)} Mbps` : '--');
@@ -153,6 +171,7 @@ class ContinuousTestService {
       endsAt: now + totalPlannedSeconds * 1000,
       phase: 'waiting',
       liveSecondary: 'Starting continuous session...',
+      surveyId: generateUUID(),
     });
 
     locationService.requestPermission().catch(() => {});
@@ -169,6 +188,33 @@ class ContinuousTestService {
     return this.finish(true);
   }
 
+  /** Pauses between cycles; a running cycle finishes first. Paused time is not counted. */
+  pause() {
+    if (!this.state.active || this.state.paused) return;
+    this.setState({ paused: true, pausedAt: Date.now() });
+  }
+
+  resume() {
+    if (!this.state.active || !this.state.paused) return;
+    const pausedMs = Date.now() - (this.state.pausedAt ?? Date.now());
+    this.setState({
+      paused: false,
+      pausedAt: null,
+      endsAt: (this.state.endsAt ?? Date.now()) + pausedMs,
+      gapEndsAt: this.state.gapEndsAt != null ? this.state.gapEndsAt + pausedMs : null,
+    });
+  }
+
+  private async waitWhilePaused(sessionId: number) {
+    if (!this.state.paused) return;
+    const resumePhase = this.state.phase;
+    this.setState({ phase: 'paused', liveSecondary: 'Paused' });
+    while (this.isCurrent(sessionId) && this.state.paused) {
+      await sleep(500);
+    }
+    if (this.isCurrent(sessionId)) this.setState({ phase: resumePhase });
+  }
+
   markResultsSeen() {
     if (!this.state.resultsSeen) {
       this.setState({ resultsSeen: true });
@@ -178,6 +224,8 @@ class ContinuousTestService {
   private async loop(sessionId: number) {
     try {
       while (this.isCurrent(sessionId) && Date.now() < (this.state.endsAt ?? 0)) {
+        await this.waitWhilePaused(sessionId);
+        if (!this.isCurrent(sessionId)) return;
         const config = this.state.config!;
         const cycleNumber = this.state.currentCycle + 1;
         const busyOwner = testCoordinator.getActiveOwner();
@@ -216,17 +264,21 @@ class ContinuousTestService {
         const endsAt = this.state.endsAt ?? 0;
         if (Date.now() >= endsAt) break;
 
-        const gapEndsAt = Math.min(Date.now() + Math.max(3, config.gapSeconds) * 1000, endsAt);
         this.setState({
           phase: 'gap',
-          gapEndsAt,
+          gapEndsAt: Math.min(Date.now() + Math.max(3, config.gapSeconds) * 1000, endsAt),
           liveProgress: 0,
           liveSecondary: `Cooling interval before Cycle #${cycleNumber + 1}`,
         });
 
-        // Timestamp based wait: correct even if JS was suspended in between
-        while (this.isCurrent(sessionId) && Date.now() < gapEndsAt) {
-          await sleep(Math.min(500, Math.max(gapEndsAt - Date.now(), 0)));
+        // Timestamp based wait: correct even if JS was suspended in between.
+        // gapEndsAt is re-read because resume() shifts it by the paused time.
+        while (this.isCurrent(sessionId) && Date.now() < (this.state.gapEndsAt ?? 0)) {
+          if (this.state.paused) {
+            await this.waitWhilePaused(sessionId);
+            continue;
+          }
+          await sleep(Math.min(500, Math.max((this.state.gapEndsAt ?? 0) - Date.now(), 0)));
         }
       }
 
@@ -241,10 +293,11 @@ class ContinuousTestService {
     }
   }
 
+  /** Reuses the watched fix only while it is fresh; otherwise requests a new one. */
   private async getLocation(): Promise<GeoLocationResult> {
-    if (this.lastLocation) return this.lastLocation;
+    if (isFreshLocation(this.lastLocation)) return this.lastLocation;
     const loc = await locationService.getCurrentLocation();
-    this.lastLocation = loc;
+    if (loc.lat != null) this.lastLocation = loc;
     return loc;
   }
 
@@ -267,7 +320,10 @@ class ContinuousTestService {
       lat: loc.lat,
       lng: loc.lng,
       accuracy: loc.accuracy,
+      location_ts: loc.timestamp != null ? loc.timestamp / 1000 : null,
+      speed_mps: loc.speed ?? null,
       test_type: 'continuous',
+      session_id: this.state.surveyId,
     };
   }
 
@@ -337,46 +393,55 @@ class ContinuousTestService {
       }
 
       if (config.testType === 'coverage') {
-        this.setState({ liveProgress: 20, liveSecondary: 'Reading network, carrier & radio...' });
-        const net = await speedTester.getNetworkContext();
-
-        this.setState({ liveProgress: 55, liveSecondary: 'Probing reachability & latency...' });
-        const ping = net.isConnected
-          ? await speedTester.measureLatencyAndJitter(appConfig.serverUrl)
-          : { latency: null, jitter: null, packetLoss: 100 };
-        const connected = net.isConnected && ping.packetLoss < 100;
-        this.setState({
-          liveProgress: 100,
-          livePrimary: connected ? net.radio || net.network : 'No Service',
-          liveSecondary: ping.latency != null ? `${ping.latency} ms latency` : 'Unreachable',
+        const capMB = config.dataCapMB ?? DEFAULT_COVERAGE_DATA_CAP_MB;
+        const allowThroughput = this.state.dataUsedMB + COVERAGE_DOWNLOAD_MB <= capMB;
+        const m = await measureCoverage({
+          serverUrl: appConfig.serverUrl,
+          allowThroughput,
+          getLocation: () => this.getLocation(),
+          onProgress: p => {
+            if (p.stage === 'network') {
+              this.setState({ liveProgress: 15, liveSecondary: 'Reading network state...' });
+            } else if (p.stage === 'latency') {
+              this.setState({ liveProgress: 40, liveSecondary: 'Measuring latency...' });
+            } else if (p.stage === 'throughput') {
+              this.setState({ liveProgress: 70, liveSecondary: 'Measuring throughput...' });
+            } else {
+              this.setState({ liveProgress: 90, liveSecondary: 'Resolving GPS fix...' });
+            }
+          },
         });
+        const dataUsedMB = this.state.dataUsedMB + m.bytesUsed / (1024 * 1024);
+        const label = EXPERIENCE_LABELS[m.experience];
+        let liveSecondary = m.latencyMs != null ? `${m.latencyMs} ms latency` : 'Unreachable';
+        if (!allowThroughput) liveSecondary = `Data cap (${capMB} MB) reached: latency only`;
+        this.setState({ dataUsedMB, liveProgress: 100, livePrimary: label, liveSecondary });
 
-        const sample: Sample = {
-          ...base,
-          latency_ms: ping.latency,
-          jitter_ms: ping.jitter,
-          packet_loss_pct: ping.packetLoss,
-          network: net.network,
-          radio: net.radio,
-          carrier: net.carrier,
-        };
-        const gps = loc.accuracy != null ? ` • GPS ±${Math.round(loc.accuracy)}m` : '';
+        // Every cycle is stored, including failures, so dead zones stay on the map
+        const sample: Sample = { ...base, ...coverageSampleFields(m) };
+        const gps = m.location.accuracy != null ? ` • GPS ±${Math.round(m.location.accuracy)}m` : '';
+        const failure = m.failureReason ? ` • ${m.failureReason}` : '';
+        let secondaryMetric = '--';
+        if (m.downMbps != null) secondaryMetric = formatMbps(m.downMbps);
+        else if (m.latencyMs != null) secondaryMetric = `${m.latencyMs} ms`;
         return {
           sample,
           cycle: {
             cycleNumber,
             timestamp,
-            primaryMetric: connected ? net.radio || net.network : 'No Service',
-            primaryLabel: 'Network',
-            secondaryMetric: ping.latency != null ? `${ping.latency} ms` : '--',
-            secondaryLabel: 'Latency',
-            extraInfo: `${net.carrier ?? 'Unknown'} • Loss ${ping.packetLoss}%${gps}`,
-            numericVal: ping.latency ?? 0,
-            failed: !connected,
+            primaryMetric: label,
+            primaryLabel: 'Experience',
+            secondaryMetric,
+            secondaryLabel: m.downMbps != null ? 'Download' : 'Latency',
+            extraInfo: `${m.carrier ?? 'Unknown'} • ${m.radio ?? m.network}${gps}${failure}`,
+            numericVal: m.latencyMs ?? 0,
+            failed: !m.connected,
             details: {
-              latencyMs: ping.latency,
-              carrier: net.carrier,
-              radio: connected ? net.radio : null,
+              latencyMs: m.latencyMs,
+              downMbps: m.downMbps,
+              experience: m.experience,
+              carrier: m.carrier,
+              radio: m.connected ? m.radio : null,
             },
           },
         };
@@ -459,9 +524,11 @@ class ContinuousTestService {
     const ok = cycles.filter(c => !c.failed);
     const startedAt = this.state.startedAt ?? Date.now();
     const plannedSeconds = Math.max(10, config.durationMins * 60);
+    // endsAt was extended by any paused time, so subtract that back out
+    const pausedMs = Math.max(0, (this.state.endsAt ?? 0) - startedAt - plannedSeconds * 1000);
     const totalSecondsElapsed = Math.min(
       plannedSeconds,
-      Math.max(0, Math.round((Date.now() - startedAt) / 1000))
+      Math.max(0, Math.round((Date.now() - startedAt - pausedMs) / 1000))
     );
 
     let summary: ContinuousTestSessionResults['summary'];
@@ -482,13 +549,14 @@ class ContinuousTestService {
       };
     } else if (config.testType === 'coverage') {
       const avgLat = average(ok.map(c => c.details?.latencyMs));
+      const avgDown = average(ok.map(c => c.details?.downMbps));
       summary = {
-        stat1Label: 'Avg Latency',
-        stat1Value: avgLat != null ? `${Math.round(avgLat)} ms` : '--',
-        stat2Label: 'Connectivity',
-        stat2Value: cycles.length ? `${Math.round((ok.length / cycles.length) * 100)}%` : '--',
-        stat3Label: 'Active Carrier',
-        stat3Value: mostCommon(cycles.map(c => c.details?.carrier)) ?? '--',
+        stat1Label: 'Avg Download',
+        stat1Value: formatMbps(avgDown),
+        stat2Label: 'Avg Latency',
+        stat2Value: avgLat != null ? `${Math.round(avgLat)} ms` : '--',
+        stat3Label: 'Connectivity',
+        stat3Value: cycles.length ? `${Math.round((ok.length / cycles.length) * 100)}%` : '--',
         stat4Label: 'Network Type',
         stat4Value: mostCommon(ok.map(c => c.details?.radio)) ?? '--',
       };
@@ -544,9 +612,14 @@ class ContinuousTestService {
 
     // Location watch feeds each cycle's coordinates (and keeps Android awake with the service)
     if (this.watchId === null) {
-      this.watchId = locationService.watchPosition(loc => {
-        this.lastLocation = loc;
-      });
+      // Coverage surveys need precise, frequent fixes while walking/driving
+      const survey = this.state.config?.testType === 'coverage';
+      this.watchId = locationService.watchPosition(
+        loc => {
+          this.lastLocation = loc;
+        },
+        survey ? { enableHighAccuracy: true, distanceFilter: 10, interval: 5000 } : undefined
+      );
     }
 
     // Android: foreground service. Monitor stopping also stops the shared service,

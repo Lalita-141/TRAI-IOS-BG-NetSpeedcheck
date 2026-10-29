@@ -38,6 +38,8 @@ export interface CycleResult {
   details?: {
     upMbps?: number | null;
     latencyMs?: number | null;
+    downMbps?: number | null;
+    experience?: string | null;
     videoDelayMs?: number | null;
     videoMbps?: number | null;
     carrier?: string | null;

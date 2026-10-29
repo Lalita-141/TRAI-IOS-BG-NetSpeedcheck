@@ -21,6 +21,7 @@ export interface ContinuousTestConfig {
   testType: ContinuousTestType;
   gapSeconds: number;
   durationMins: number;
+  dataCapMB?: number; // coverage only: throughput tests stop past this budget
 }
 
 interface ContinuousTestSetupViewProps {

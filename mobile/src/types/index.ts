@@ -23,6 +23,20 @@ export interface Sample {
   page_load_sec?: number | null;
   ttfb_ms?: number | null;
   streaming_quality?: string | null;
+  // Actual RF measurements. Null unless genuinely measured by the device
+  // (never available on iOS; never derived from speed, GPS or connection type).
+  signal_dbm?: number | null;
+  signal_quality?: string | null;
+  cell_tower?: string | null;
+  frequency_band?: string | null;
+  // Network Experience Coverage metadata
+  measurement_source?: string | null; // 'ios_network_experience' | 'android_network_experience' | 'android_telephony'
+  quality_category?: string | null; // ExperienceCategory from config/coverageThresholds
+  failure_reason?: string | null; // 'no_path' | 'timeout' | 'http_error' | 'location_unavailable' ...
+  link_quality?: string | null; // iOS 26+ NWPath.linkQuality: 'good' | 'moderate' | 'minimal' | 'unknown'
+  location_ts?: number | null; // Unix seconds of the GPS fix (may predate ts)
+  speed_mps?: number | null; // GPS ground speed
+  session_id?: string | null; // groups samples of one coverage survey
   is_pending?: boolean; // UI only: still waiting in the local queue for upload
 }
 
@@ -64,4 +78,6 @@ export interface GeoLocationResult {
   lat: number | null;
   lng: number | null;
   accuracy: number | null;
+  timestamp?: number | null; // ms epoch of the GPS fix
+  speed?: number | null; // m/s ground speed, null when unknown
 }

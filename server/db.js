@@ -65,6 +65,13 @@ async function initDatabase() {
         signal_quality VARCHAR(32) NULL,
         cell_tower VARCHAR(64) NULL,
         frequency_band VARCHAR(32) NULL,
+        measurement_source VARCHAR(40) NULL,
+        quality_category VARCHAR(16) NULL,
+        failure_reason VARCHAR(32) NULL,
+        link_quality VARCHAR(16) NULL,
+        location_ts DOUBLE NULL,
+        speed_mps DOUBLE NULL,
+        session_id VARCHAR(64) NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_samples_ts (ts),
         INDEX idx_samples_device_id (device_id),
@@ -105,6 +112,14 @@ async function initDatabase() {
       { name: 'signal_quality', type: 'VARCHAR(32) NULL' },
       { name: 'cell_tower', type: 'VARCHAR(64) NULL' },
       { name: 'frequency_band', type: 'VARCHAR(32) NULL' },
+      // Network Experience Coverage metadata (all nullable, additive)
+      { name: 'measurement_source', type: 'VARCHAR(40) NULL' },
+      { name: 'quality_category', type: 'VARCHAR(16) NULL' },
+      { name: 'failure_reason', type: 'VARCHAR(32) NULL' },
+      { name: 'link_quality', type: 'VARCHAR(16) NULL' },
+      { name: 'location_ts', type: 'DOUBLE NULL' },
+      { name: 'speed_mps', type: 'DOUBLE NULL' },
+      { name: 'session_id', type: 'VARCHAR(64) NULL' },
     ];
 
     const [existingCols] = await pool.query(

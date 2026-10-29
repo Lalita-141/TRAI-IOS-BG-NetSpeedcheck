@@ -8,6 +8,7 @@ import {
   SafeAreaView,
 } from 'react-native';
 import { Sample } from '../types';
+import { formatRfSignal } from '../config/coverageThresholds';
 import { VideoBrowserTestResults } from './VideoBrowserTestProgressView';
 import { reverseGeocode } from '../services/geocodeService';
 import {
@@ -58,20 +59,18 @@ export const VideoBrowserTestResultView: React.FC<VideoBrowserTestResultViewProp
     hour12: true,
   });
 
-  const videoDelay = results?.videoDelayMs ?? 145;
-  const webDelay = results?.webDelayMs ?? 310;
-  const quality = results?.streamingQuality ?? '1080p Full HD';
-  const bufferRate = results?.bufferingRate ?? '0% (Smooth)';
-  const ttfb = results?.ttfbMs ?? 38;
+  // Unmeasured values render as '--'; never substitute sample numbers.
+  const videoDelay = results?.videoDelayMs ?? '--';
+  const webDelay = results?.webDelayMs ?? '--';
+  const quality = results?.streamingQuality ?? '--';
+  const bufferRate = results?.bufferingRate ?? '--';
+  const ttfb = results?.ttfbMs ?? '--';
 
-  const carrier = sample?.carrier && sample.carrier !== '--' ? sample.carrier : 'Jio';
-  const radio = sample?.radio || (sample?.network === 'wifi' ? 'Wi-Fi' : '4G');
-  const coverageDbm = sample?.network === 'wifi' ? '-58 dBm' : '-101 dBm';
+  const carrier = sample?.carrier && sample.carrier !== '--' ? sample.carrier : 'Unknown';
+  const radio = sample?.radio || '--';
+  const coverageDbm = formatRfSignal(sample?.signal_dbm);
 
-  const serverDisplay =
-    carrier === 'Wi-Fi'
-      ? 'TRAI Broadband Video CDN - Mumbai'
-      : `${carrier.toUpperCase()} - Streaming Cache Server`;
+  const serverDisplay = 'Configured test server';
 
   return (
     <SafeAreaView style={styles.safeArea}>
