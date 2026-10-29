@@ -23,6 +23,7 @@ export interface Sample {
   page_load_sec?: number | null;
   ttfb_ms?: number | null;
   streaming_quality?: string | null;
+  is_pending?: boolean; // UI only: still waiting in the local queue for upload
 }
 
 export interface AppConfig {

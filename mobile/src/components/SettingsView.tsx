@@ -373,37 +373,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
     if (!deviceId) return;
     setIsSyncingCloudHistory(true);
     try {
-      const res = await uploader.fetchDeviceHistory(deviceId, 200);
-      if (res.success && res.samples && res.samples.length > 0) {
-        let imported = 0;
-        for (const s of res.samples) {
-          await sampleStore.add({
-            id: s.id,
-            device_id: s.device_id,
-            ts: s.ts,
-            test_type: s.test_type || 'speed',
-            down_mbps: s.down_mbps,
-            up_mbps: s.up_mbps,
-            latency_ms: s.latency_ms,
-            jitter_ms: s.jitter_ms,
-            packet_loss_pct: s.packet_loss_pct,
-            network: s.network,
-            radio: s.radio,
-            carrier: s.carrier,
-            device_model: s.device_model,
-            os_platform: s.os_platform,
-            location_type: s.location_type,
-            lat: s.lat,
-            lng: s.lng,
-            accuracy: s.accuracy,
-          });
-          imported++;
-        }
+      // Refreshes the offline history cache from the server (does not re-queue records for upload)
+      const res = await uploader.syncHistoryFromServer(true);
+      if (!res.success) {
+        Alert.alert('Sync Failed', res.error || 'Unable to connect to server.');
+      } else if (res.count && res.count > 0) {
         const capacity = await sampleStore.getCapacityInfo();
         setSampleCount(capacity.count);
         Alert.alert(
           'Cloud Sync Complete',
-          `Successfully synchronized ${res.samples.length} measurement record(s) from the server!`
+          `Successfully synchronized ${res.count} measurement record(s) from the server!`
         );
       } else {
         Alert.alert('Cloud Sync', 'No historical records found for this device on the server.');

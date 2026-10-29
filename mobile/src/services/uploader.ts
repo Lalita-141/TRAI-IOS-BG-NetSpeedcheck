@@ -1,5 +1,17 @@
-import { getConfig } from '../config';
+import { getConfig, getDeviceId } from '../config';
 import { sampleStore } from './sampleStore';
+
+// Don't refetch history more often than this unless forced (tab switches call it a lot)
+const HISTORY_SYNC_MIN_INTERVAL_MS = 30 * 1000;
+const HISTORY_FETCH_TIMEOUT_MS = 10 * 1000;
+const MAX_SERVER_HISTORY = 500; // server-side cap of /v1/devices/:id/history
+
+export interface HistorySyncResult {
+  success: boolean;
+  count?: number;
+  skipped?: boolean;
+  error?: string;
+}
 
 export interface UploadResult {
   uploadedCount: number;
@@ -10,6 +22,8 @@ export interface UploadResult {
 
 class Uploader {
   private busy = false;
+  private historySyncInFlight: Promise<HistorySyncResult> | null = null;
+  private lastHistorySyncAt = 0;
 
   async flush(): Promise<UploadResult> {
     if (this.busy) {
@@ -103,6 +117,8 @@ class Uploader {
       }
 
       const data = await res.json();
+      // Server history is gone: drop the offline copy of it too (unsent samples stay)
+      await sampleStore.clearSyncedHistory();
       return { success: true, count: data.deleted_count };
     } catch (err: any) {
       return { success: false, error: err?.message || 'Network request failed' };
@@ -159,6 +175,8 @@ class Uploader {
     deviceId: string,
     limit: number = 100
   ): Promise<{ success: boolean; samples?: any[]; error?: string }> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), HISTORY_FETCH_TIMEOUT_MS);
     try {
       const config = await getConfig();
       const serverUrl = config.serverUrl.replace(/\/+$/, '');
@@ -168,6 +186,7 @@ class Uploader {
           headers: {
             Accept: 'application/json',
           },
+          signal: controller.signal,
         }
       );
 
@@ -179,7 +198,46 @@ class Uploader {
       return { success: true, samples: data.samples || [] };
     } catch (err: any) {
       return { success: false, error: err?.message || 'Cloud history sync failed' };
+    } finally {
+      clearTimeout(timeout);
     }
+  }
+
+  /**
+   * Online: uploads unsent samples, then replaces the offline history cache with
+   * this device's history from the server (includes native background tests).
+   * Offline / server error: leaves the cache untouched so History keeps working.
+   */
+  syncHistoryFromServer(force: boolean = false): Promise<HistorySyncResult> {
+    if (this.historySyncInFlight) {
+      return this.historySyncInFlight;
+    }
+    if (!force && Date.now() - this.lastHistorySyncAt < HISTORY_SYNC_MIN_INTERVAL_MS) {
+      return Promise.resolve({ success: true, skipped: true });
+    }
+
+    this.historySyncInFlight = (async (): Promise<HistorySyncResult> => {
+      try {
+        // Upload first so the server list already contains this phone's newest tests
+        await this.flush().catch(() => undefined);
+
+        const deviceId = await getDeviceId();
+        const limit = Math.min(sampleStore.getMaxHistoryLimit(), MAX_SERVER_HISTORY);
+        const res = await this.fetchDeviceHistory(deviceId, limit);
+        if (!res.success || !Array.isArray(res.samples)) {
+          return { success: false, error: res.error || 'History fetch failed' };
+        }
+
+        await sampleStore.saveServerSnapshot(res.samples);
+        this.lastHistorySyncAt = Date.now();
+        return { success: true, count: res.samples.length };
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'History sync failed' };
+      } finally {
+        this.historySyncInFlight = null;
+      }
+    })();
+    return this.historySyncInFlight;
   }
 
   /**

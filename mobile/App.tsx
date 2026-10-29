@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   SafeAreaView,
   Image,
+  AppState,
 } from 'react-native';
 import { AppConfig, Sample } from './src/types';
 import { getConfig } from './src/config';
@@ -54,12 +55,8 @@ function AppContent() {
   const [isFullScreenTest, setIsFullScreenTest] = useState(false);
   const [hideTopBarOnly, setHideTopBarOnly] = useState(false);
 
-  const loadData = useCallback(async () => {
-    const cfg = await getConfig();
-    setConfig(cfg);
-    if (cfg.maxHistoryLimit) {
-      sampleStore.setMaxHistoryLimit(cfg.maxHistoryLimit);
-    }
+  // Re-reads history (pending + cached server history) from the local store only
+  const refreshLocalHistory = useCallback(async () => {
     const history = await sampleStore.getHistory(0);
     setSamplesHistory(history);
     const pending = await sampleStore.getPendingCount();
@@ -69,6 +66,30 @@ function AppContent() {
       lastSample: history.length > 0 ? history[0] : prev.lastSample,
     }));
   }, []);
+
+  // Online: fetch this device's history from the server into the offline cache.
+  // Offline: fails quietly and the cached history stays on screen.
+  const syncHistory = useCallback(
+    async (force: boolean = false) => {
+      if (AppState.currentState !== 'active') return;
+      const res = await uploader.syncHistoryFromServer(force);
+      if (res.success && !res.skipped) {
+        await refreshLocalHistory();
+      }
+    },
+    [refreshLocalHistory]
+  );
+
+  const loadData = useCallback(async () => {
+    const cfg = await getConfig();
+    setConfig(cfg);
+    if (cfg.maxHistoryLimit) {
+      sampleStore.setMaxHistoryLimit(cfg.maxHistoryLimit);
+    }
+    // Show cached history instantly, then refresh from server in the background
+    await refreshLocalHistory();
+    syncHistory().catch(() => {});
+  }, [refreshLocalHistory, syncHistory]);
 
   useEffect(() => {
     loadData();
@@ -89,24 +110,36 @@ function AppContent() {
     // Subscribe to monitor service updates
     const unsubscribe = monitorService.subscribe(newStatus => {
       setStatus(newStatus);
-      if (newStatus.lastSample) {
+      // History list is only re-read while visible; it is reloaded on foreground anyway
+      if (newStatus.lastSample && AppState.currentState === 'active') {
         sampleStore.getHistory(0).then(setSamplesHistory);
+      }
+    });
+
+    // Back in foreground: show local changes, then pull fresh history (includes native background tests)
+    const appStateSub = AppState.addEventListener('change', nextState => {
+      if (nextState === 'active') {
+        refreshLocalHistory()
+          .then(() => syncHistory())
+          .catch(() => {});
       }
     });
 
     return () => {
       unsubscribe();
+      appStateSub.remove();
     };
-  }, [loadData]);
+  }, [loadData, refreshLocalHistory, syncHistory]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
       await loadData();
+      await syncHistory(true);
     } finally {
       setRefreshing(false);
     }
-  }, [loadData]);
+  }, [loadData, syncHistory]);
 
   const handleToggleMonitoring = async () => {
     if (status.isRunning) {
