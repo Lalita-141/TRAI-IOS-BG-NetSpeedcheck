@@ -6,6 +6,7 @@ import { sampleStore } from './sampleStore';
 import { speedTester } from './speedTester';
 import { uploader } from './uploader';
 import { locationService } from './locationService';
+import { testCoordinator, TestOwner } from './testCoordinator';
 
 export interface MonitorStatus {
   isRunning: boolean;
@@ -203,20 +204,28 @@ class MonitorService {
   private async checkAndRunIntervalTest(loc?: GeoLocationResult) {
     if (!this.isRunning || this.isTesting) return;
 
+    // Another feature (continuous / scheduled) is testing right now: skip this
+    // tick, the 5s interval loop retries once the shared test slot is free.
+    if (testCoordinator.isBusy()) return;
+
     const config = await getConfig();
     const now = Date.now();
-    const elapsedSeconds = this.lastTestTime ? (now - this.lastTestTime) / 1000 : Infinity;
+    // A full speed test run by any feature counts towards the monitor interval,
+    // so a continuous speed session doesn't get duplicated by monitor tests.
+    const lastShared = testCoordinator.getLastFullTest().at;
+    const reference = Math.max(this.lastTestTime ?? 0, lastShared);
+    const elapsedSeconds = reference ? (now - reference) / 1000 : Infinity;
 
     if (elapsedSeconds >= config.testIntervalSeconds) {
-      await this.runTest(loc);
+      await this.runTest(loc, 'monitor');
     }
   }
 
   async testNow(): Promise<Sample | null> {
-    return await this.runTest();
+    return await this.runTest(undefined, 'manual');
   }
 
-  private async runTest(location?: GeoLocationResult): Promise<Sample | null> {
+  private async runTest(location?: GeoLocationResult, owner: TestOwner = 'manual'): Promise<Sample | null> {
     if (this.isTesting) {
       console.log('Speed test already in progress, skipping...');
       return null;
@@ -225,7 +234,9 @@ class MonitorService {
     this.isTesting = true;
     this.notify({
       phase: 'idle',
-      message: 'Preparing speed test...',
+      message: testCoordinator.isBusy()
+        ? 'Waiting for the running test to finish...'
+        : 'Preparing speed test...',
       progressPercent: 5,
     });
 
@@ -240,10 +251,13 @@ class MonitorService {
         this.lastKnownLocation = loc;
       }
 
-      // Execute Speed Test
-      const result = await speedTester.runFullTest(config, progress => {
-        this.notify(progress);
-      });
+      // Execute Speed Test (exclusive: waits if continuous/scheduled is testing)
+      const result = await testCoordinator.run(owner, () =>
+        speedTester.runFullTest(config, progress => {
+          this.notify(progress);
+        })
+      );
+      testCoordinator.markFullTestCompleted(owner);
 
       // Construct Sample with QoS parameters
       const sample: Sample = {

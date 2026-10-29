@@ -21,6 +21,8 @@ export interface ScheduledTestConfig {
   frequency: ScheduleFrequency;
   fromDate: string;
   toDate: string;
+  fromTs?: number; // start of the "from" day (ms)
+  toTs?: number; // end of the "to" day (ms)
 }
 
 interface ScheduledTestSetupViewProps {
@@ -68,10 +70,16 @@ export const ScheduledTestSetupView: React.FC<ScheduledTestSetupViewProps> = ({
   };
 
   const handleSchedule = () => {
+    const fromStart = new Date(fromDate);
+    fromStart.setHours(0, 0, 0, 0);
+    const toEnd = new Date(toDate);
+    toEnd.setHours(23, 59, 59, 999);
     onScheduleTest({
       frequency,
       fromDate: formatDateDisplay(fromDate),
       toDate: formatDateDisplay(toDate),
+      fromTs: fromStart.getTime(),
+      toTs: toEnd.getTime(),
     });
   };
 

@@ -15,7 +15,20 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
     private var isMonitoring = false
     private var intervalSeconds: TimeInterval = 10.0 // 10s for rapid background & killed state verification
     private var serverUrlString: String = "https://140-245-3-81.sslip.io"
-    
+
+    // While a JS test (continuous / scheduled / manual) holds this lease, native tests are skipped
+    // so two speed tests never share the radio. Expires on its own if JS gets suspended.
+    private var jsTestLeaseUntil: Date = .distantPast
+
+    private let defaults = UserDefaults.standard
+    private let monitoringEnabledKey = "nm_monitoring_enabled"
+    private let scheduleFrequencyKey = "nm_schedule_frequency"
+    private let scheduleFromKey = "nm_schedule_from_ts"
+    private let scheduleToKey = "nm_schedule_to_ts"
+    private let scheduleServerUrlKey = "nm_schedule_server_url"
+    private let scheduleLastPeriodKey = "nm_schedule_last_period"
+    private let scheduleLastRunAtKey = "nm_schedule_last_run_at"
+
     private var configuredDeviceId: String {
         get {
             if let saved = UserDefaults.standard.string(forKey: "netspeed_device_id"), !saved.isEmpty {
@@ -59,7 +72,8 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
     func startMonitoring() {
         guard !isMonitoring else { return }
         isMonitoring = true
-        
+        defaults.set(true, forKey: monitoringEnabledKey)
+
         lm.requestAlwaysAuthorization()
         lm.startUpdatingLocation()
         lm.startMonitoringSignificantLocationChanges() // Relaunches app from killed state!
@@ -72,6 +86,7 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
     
     func stopMonitoring() {
         isMonitoring = false
+        defaults.set(false, forKey: monitoringEnabledKey)
         lm.stopUpdatingLocation()
         lm.stopMonitoringSignificantLocationChanges()
     }
@@ -94,10 +109,106 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
         task.expirationHandler = { () -> Void in
             task.setTaskCompleted(success: false)
         }
+
+        let duePeriod = dueSchedulePeriod()
+        let monitoringEnabled = isMonitoring || defaults.bool(forKey: monitoringEnabledKey)
+
+        // A JS test is running, or this is a schedule-only wake-up with nothing due yet
+        if isJsTestActive || (hasActiveSchedule && !monitoringEnabled && duePeriod == nil) {
+            task.setTaskCompleted(success: true)
+            return
+        }
+
+        if duePeriod != nil, !isMonitoring, let scheduleUrl = defaults.string(forKey: scheduleServerUrlKey) {
+            serverUrlString = scheduleUrl
+        }
+
         Task {
-            await self.performSpeedTestAndUpload(location: self.lm.location)
+            await self.performSpeedTestAndUpload(
+                location: self.lm.location,
+                testType: duePeriod != nil ? "scheduled" : nil,
+                useFallbackLocation: duePeriod == nil
+            )
             task.setTaskCompleted(success: true)
         }
+    }
+
+    // MARK: - JS test lease
+
+    func setJsTestLease(seconds: Double) {
+        jsTestLeaseUntil = seconds > 0 ? Date().addingTimeInterval(seconds) : .distantPast
+    }
+
+    private var isJsTestActive: Bool {
+        return Date() < jsTestLeaseUntil
+    }
+
+    // MARK: - Scheduled test (runs from BGAppRefreshTask while the app is closed)
+
+    private var hasActiveSchedule: Bool {
+        return defaults.string(forKey: scheduleFrequencyKey) != nil
+    }
+
+    func setSchedule(frequency: String, fromTs: Double, toTs: Double, serverUrl: String, deviceId: String?) {
+        defaults.set(frequency, forKey: scheduleFrequencyKey)
+        defaults.set(fromTs, forKey: scheduleFromKey)
+        defaults.set(toTs, forKey: scheduleToKey)
+        defaults.set(serverUrl, forKey: scheduleServerUrlKey)
+        defaults.removeObject(forKey: scheduleLastPeriodKey)
+        defaults.removeObject(forKey: scheduleLastRunAtKey)
+        if let dId = deviceId, !dId.isEmpty {
+            configuredDeviceId = dId
+        }
+        scheduleAppRefresh()
+    }
+
+    func clearSchedule() {
+        for key in [scheduleFrequencyKey, scheduleFromKey, scheduleToKey, scheduleServerUrlKey,
+                    scheduleLastPeriodKey, scheduleLastRunAtKey] {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
+    func markScheduledRun(period: Int, at: Double) {
+        defaults.set(period, forKey: scheduleLastPeriodKey)
+        defaults.set(at, forKey: scheduleLastRunAtKey)
+    }
+
+    func scheduleState() -> [String: Any] {
+        let lastPeriod = defaults.object(forKey: scheduleLastPeriodKey) != nil
+            ? defaults.integer(forKey: scheduleLastPeriodKey) : -1
+        return [
+            "active": hasActiveSchedule,
+            "lastRunPeriod": lastPeriod,
+            "lastRunAt": defaults.double(forKey: scheduleLastRunAtKey),
+        ]
+    }
+
+    /// Period index containing `date` (one per calendar day / 7-day block / calendar month),
+    /// or nil outside the schedule window. Must match schedulePeriodIndex in scheduledTestService.ts.
+    private func schedulePeriodIndex(for date: Date) -> Int? {
+        guard let frequency = defaults.string(forKey: scheduleFrequencyKey) else { return nil }
+        let from = Date(timeIntervalSince1970: defaults.double(forKey: scheduleFromKey))
+        let to = Date(timeIntervalSince1970: defaults.double(forKey: scheduleToKey))
+        guard date >= from, date <= to else { return nil }
+
+        let cal = Calendar.current
+        if frequency == "monthly" {
+            let a = cal.dateComponents([.year, .month], from: from)
+            let b = cal.dateComponents([.year, .month], from: date)
+            return ((b.year ?? 0) * 12 + (b.month ?? 0)) - ((a.year ?? 0) * 12 + (a.month ?? 0))
+        }
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: from), to: cal.startOfDay(for: date)).day ?? 0
+        return frequency == "weekly" ? days / 7 : days
+    }
+
+    private func dueSchedulePeriod(now: Date = Date()) -> Int? {
+        guard let period = schedulePeriodIndex(for: now) else { return nil }
+        if defaults.object(forKey: scheduleLastPeriodKey) != nil,
+           defaults.integer(forKey: scheduleLastPeriodKey) == period {
+            return nil
+        }
+        return period
     }
     
     func handleRelaunch(launchOptions: [UIApplication.LaunchOptionsKey: Any]?) {
@@ -118,7 +229,7 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
     }
     
     func runTest(location: CLLocation?) {
-        guard !isTesting else { return }
+        guard !isTesting, !isJsTestActive else { return }
         isTesting = true
         lastTestTime = Date()
         
@@ -138,7 +249,7 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
         }
     }
     
-    private func performSpeedTestAndUpload(location: CLLocation?) async {
+    private func performSpeedTestAndUpload(location: CLLocation?, testType: String? = nil, useFallbackLocation: Bool = true) async {
         guard let serverUrl = URL(string: serverUrlString) else { return }
         
         // 1. Telecom & Radio context
@@ -226,7 +337,7 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
         let accuracy = location?.horizontalAccuracy ?? 5.0
         let env = accuracy < 25.0 ? "Outdoor" : "Indoor"
         
-        let samplePayload: [String: Any] = [
+        var samplePayload: [String: Any] = [
             "id": sampleId,
             "device_id": deviceId,
             "ts": Date().timeIntervalSince1970,
@@ -245,7 +356,15 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
             "lng": lng,
             "accuracy": accuracy
         ]
-        
+        if let testType = testType {
+            samplePayload["test_type"] = testType
+        }
+        if location == nil && !useFallbackLocation {
+            samplePayload["lat"] = NSNull()
+            samplePayload["lng"] = NSNull()
+            samplePayload["accuracy"] = NSNull()
+        }
+
         // Send POST to /v1/speed-samples
         let ingestUrl = serverUrl.appendingPathComponent("v1/speed-samples")
         var ingestReq = URLRequest(url: ingestUrl)
@@ -253,10 +372,56 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
         ingestReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let body = try? JSONSerialization.data(withJSONObject: ["samples": [samplePayload]]) {
             ingestReq.httpBody = body
-            _ = try? await session.data(for: ingestReq)
+            let response = try? await session.data(for: ingestReq)
             NSLog("[NativeMonitorService] Successfully uploaded background/killed sample \(sampleId) -> \(downMbps) Mbps (Device: \(deviceId))")
+
+            // Any native test uploaded during a due schedule period also satisfies that period
+            if (response?.1 as? HTTPURLResponse)?.statusCode == 200, let period = dueSchedulePeriod() {
+                markScheduledRun(period: period, at: Date().timeIntervalSince1970)
+            }
         }
     }
+}
+
+/// Low-power location session that keeps the JS runtime alive in the background
+/// (screen off / app backgrounded) while a continuous test session runs.
+/// Separate from NativeMonitorService's manager, so it never triggers native monitor tests.
+final class NativeKeepAlive: NSObject, CLLocationManagerDelegate {
+    static let shared = NativeKeepAlive()
+
+    private let lm = CLLocationManager()
+    private var holders = Set<String>()
+
+    private override init() {
+        super.init()
+        lm.delegate = self
+        lm.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        lm.distanceFilter = 50
+        lm.pausesLocationUpdatesAutomatically = false
+        lm.allowsBackgroundLocationUpdates = true
+        if #available(iOS 11.0, *) {
+            lm.showsBackgroundLocationIndicator = true
+        }
+    }
+
+    func acquire(_ tag: String) {
+        holders.insert(tag)
+        if holders.count == 1 {
+            lm.requestAlwaysAuthorization()
+            lm.startUpdatingLocation()
+        }
+    }
+
+    func release(_ tag: String) {
+        holders.remove(tag)
+        if holders.isEmpty {
+            lm.stopUpdatingLocation()
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {}
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {}
 }
 
 @objc(NativeMonitorBridge)
@@ -306,6 +471,61 @@ final class NativeMonitorBridge: NSObject, RCTBridgeModule {
     func isRunning(resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
         DispatchQueue.main.async {
             resolve(NativeMonitorService.shared.isRunning())
+        }
+    }
+
+    @objc(setJsTestLease:resolver:rejecter:)
+    func setJsTestLease(seconds: Double, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            NativeMonitorService.shared.setJsTestLease(seconds: seconds)
+            resolve(true)
+        }
+    }
+
+    @objc(acquireKeepAlive:resolver:rejecter:)
+    func acquireKeepAlive(tag: String, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            NativeKeepAlive.shared.acquire(tag)
+            resolve(true)
+        }
+    }
+
+    @objc(releaseKeepAlive:resolver:rejecter:)
+    func releaseKeepAlive(tag: String, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            NativeKeepAlive.shared.release(tag)
+            resolve(true)
+        }
+    }
+
+    @objc(setSchedule:fromTs:toTs:serverUrl:deviceId:resolver:rejecter:)
+    func setSchedule(frequency: String, fromTs: Double, toTs: Double, serverUrl: String, deviceId: String, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            NativeMonitorService.shared.setSchedule(frequency: frequency, fromTs: fromTs, toTs: toTs, serverUrl: serverUrl, deviceId: deviceId)
+            resolve(true)
+        }
+    }
+
+    @objc(clearSchedule:rejecter:)
+    func clearSchedule(resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            NativeMonitorService.shared.clearSchedule()
+            resolve(true)
+        }
+    }
+
+    @objc(markScheduledRun:at:resolver:rejecter:)
+    func markScheduledRun(period: Double, at: Double, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            NativeMonitorService.shared.markScheduledRun(period: Int(period), at: at)
+            resolve(true)
+        }
+    }
+
+    @objc(getScheduleState:rejecter:)
+    func getScheduleState(resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            resolve(NativeMonitorService.shared.scheduleState())
         }
     }
 }

@@ -19,6 +19,10 @@ import {
 } from './Icons';
 import { ContinuousTestConfig, ContinuousTestType } from './ContinuousTestSetupView';
 import { MonitorStatus } from '../services/monitorService';
+import {
+  continuousTestService,
+  useContinuousSession,
+} from '../services/continuousTestService';
 
 export interface CycleResult {
   cycleNumber: number;
@@ -29,6 +33,16 @@ export interface CycleResult {
   secondaryLabel: string;
   extraInfo: string;
   numericVal: number;
+  failed?: boolean;
+  // Raw measured values used for the session summary
+  details?: {
+    upMbps?: number | null;
+    latencyMs?: number | null;
+    videoDelayMs?: number | null;
+    videoMbps?: number | null;
+    carrier?: string | null;
+    radio?: string | null;
+  };
 }
 
 export interface ContinuousTestSessionResults {
@@ -55,31 +69,23 @@ interface ContinuousTestProgressViewProps {
   status: MonitorStatus;
   onStop: (results: ContinuousTestSessionResults) => void;
   onComplete: (results: ContinuousTestSessionResults) => void;
+  onMinimize?: () => void;
 }
 
 export const ContinuousTestProgressView: React.FC<ContinuousTestProgressViewProps> = ({
   config,
-  status,
   onStop,
   onComplete,
+  onMinimize,
 }) => {
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const totalPlannedSeconds = Math.max(10, config.durationMins * 60);
-  const [secondsRemaining, setSecondsRemaining] = useState(totalPlannedSeconds);
-
-  const [currentCycle, setCurrentCycle] = useState(1);
-  const [phase, setPhase] = useState<'testing' | 'gap'>('testing');
-  const [gapRemaining, setGapRemaining] = useState(config.gapSeconds);
-  const [completedCycles, setCompletedCycles] = useState<CycleResult[]>([]);
-
-  // Live animated / fluctuating values during testing
-  const [livePrimary, setLivePrimary] = useState<string>('0.00');
-  const [liveSecondary, setLiveSecondary] = useState<string>('--');
-  const [liveProgress, setLiveProgress] = useState(0);
+  // Session runs in continuousTestService, so it survives tab switches,
+  // screen-off and app backgrounding. This screen only renders its state.
+  const session = useContinuousSession();
+  const [now, setNow] = useState(Date.now());
+  const reportedRef = useRef(false);
+  const mountedSessionStartRef = useRef(session.startedAt);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const isStoppedRef = useRef(false);
-  const finishSessionRef = useRef<(stoppedByUser: boolean) => void>(() => {});
 
   // Pulse animation for the active testing ring
   useEffect(() => {
@@ -101,280 +107,60 @@ export const ContinuousTestProgressView: React.FC<ContinuousTestProgressViewProp
     return () => pulse.stop();
   }, [pulseAnim]);
 
-  // Overall timer ticker
+  // UI clock: elapsed / remaining / gap countdown are derived from service timestamps
   useEffect(() => {
-    const timer = setInterval(() => {
-      if (isStoppedRef.current) return;
-      setElapsedSeconds(prev => prev + 1);
-      setSecondsRemaining(prev => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          finishSessionRef.current(false);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
+    const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // Compute summary stats helper
-  const buildSessionResults = (cycles: CycleResult[], stoppedByUser: boolean): ContinuousTestSessionResults => {
-    const totalElapsed = elapsedSeconds;
-    const count = cycles.length;
-
-    let stat1Label = 'Avg Speed';
-    let stat1Value = '0 Mbps';
-    let stat2Label = 'Peak Speed';
-    let stat2Value = '0 Mbps';
-    let stat3Label = 'Avg Upload';
-    let stat3Value = '0 Mbps';
-    let stat4Label = 'Success Rate';
-    let stat4Value = '100%';
-
-    if (config.testType === 'speed') {
-      stat1Label = 'Avg Download';
-      stat2Label = 'Peak Download';
-      stat3Label = 'Avg Upload';
-      stat4Label = 'Avg Latency';
-
-      if (count > 0) {
-        const sumDown = cycles.reduce((acc, c) => acc + c.numericVal, 0);
-        const maxDown = Math.max(...cycles.map(c => c.numericVal));
-        stat1Value = `${(sumDown / count).toFixed(1)} Mbps`;
-        stat2Value = `${maxDown.toFixed(1)} Mbps`;
-        stat3Value = `${(sumDown / count * 0.42).toFixed(1)} Mbps`;
-        stat4Value = '19 ms';
-      } else {
-        stat1Value = `${(status.lastSample?.down_mbps ?? 52.4).toFixed(1)} Mbps`;
-        stat2Value = `${(status.lastSample?.down_mbps ?? 52.4).toFixed(1)} Mbps`;
-        stat3Value = '22.1 Mbps';
-        stat4Value = '18 ms';
-      }
-    } else if (config.testType === 'coverage') {
-      stat1Label = 'Avg Signal';
-      stat2Label = 'Signal Rating';
-      stat3Label = 'Active Carrier';
-      stat4Label = 'Coverage Score';
-
-      if (count > 0) {
-        const sumDbm = cycles.reduce((acc, c) => acc + c.numericVal, 0);
-        const avgDbm = Math.round(sumDbm / count);
-        stat1Value = `${avgDbm} dBm`;
-        stat2Value = avgDbm > -80 ? 'Excellent' : 'Good';
-        stat3Value = status.lastSample?.network === 'wifi' ? 'Airtel Wi-Fi' : 'Jio 5G';
-        stat4Value = '98%';
-      } else {
-        stat1Value = '-58 dBm';
-        stat2Value = 'Excellent';
-        stat3Value = 'Airtel Wi-Fi';
-        stat4Value = '98%';
-      }
-    } else {
-      // video_browser
-      stat1Label = 'Avg Load Time';
-      stat2Label = 'Stream Quality';
-      stat3Label = 'Buffer Health';
-      stat4Label = 'Video Bitrate';
-
-      if (count > 0) {
-        const sumLoad = cycles.reduce((acc, c) => acc + c.numericVal, 0);
-        stat1Value = `${(sumLoad / count).toFixed(2)}s`;
-        stat2Value = '1080p 60fps';
-        stat3Value = '99%';
-        stat4Value = '12.4 Mbps';
-      } else {
-        stat1Value = '1.14s';
-        stat2Value = '1080p 60fps';
-        stat3Value = '99%';
-        stat4Value = '12.4 Mbps';
-      }
-    }
-
-    return {
-      testType: config.testType,
-      durationMinsPlanned: config.durationMins,
-      totalSecondsElapsed: totalElapsed,
-      totalCyclesCompleted: count,
-      stoppedByUser,
-      cycles,
-      summary: {
-        stat1Label,
-        stat1Value,
-        stat2Label,
-        stat2Value,
-        stat3Label,
-        stat3Value,
-        stat4Label,
-        stat4Value,
-      },
-    };
-  };
-
-  const finishSession = (stoppedByUser: boolean) => {
-    if (isStoppedRef.current) return;
-    isStoppedRef.current = true;
-
-    // Ensure we have at least one cycle recorded if test was running
-    let finalCycles = [...completedCycles];
-    if (finalCycles.length === 0) {
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      if (config.testType === 'speed') {
-        finalCycles = [{
-          cycleNumber: 1,
-          timestamp: timeStr,
-          primaryMetric: '52.9 Mbps',
-          primaryLabel: 'Download',
-          secondaryMetric: '21.4 Mbps',
-          secondaryLabel: 'Upload',
-          extraInfo: 'Ping: 18 ms',
-          numericVal: 52.9,
-        }];
-      } else if (config.testType === 'coverage') {
-        finalCycles = [{
-          cycleNumber: 1,
-          timestamp: timeStr,
-          primaryMetric: '-58 dBm',
-          primaryLabel: 'Signal',
-          secondaryMetric: 'Excellent',
-          secondaryLabel: 'Quality',
-          extraInfo: 'Wi-Fi 5GHz • Sector 4',
-          numericVal: -58,
-        }];
-      } else {
-        finalCycles = [{
-          cycleNumber: 1,
-          timestamp: timeStr,
-          primaryMetric: '1.18s',
-          primaryLabel: 'Page Load',
-          secondaryMetric: '1080p',
-          secondaryLabel: 'Stream',
-          extraInfo: 'Buffer: 99%',
-          numericVal: 1.18,
-        }];
-      }
-    }
-
-    const sessionRes = buildSessionResults(finalCycles, stoppedByUser);
-    if (stoppedByUser) {
-      onStop(sessionRes);
-    } else {
-      onComplete(sessionRes);
-    }
-  };
-  finishSessionRef.current = finishSession;
-
-  // Test cycle loop runner
+  // Session ended (duration completed) while this screen is open
   useEffect(() => {
-    let isActive = true;
+    if (reportedRef.current || session.active || !session.lastResults) return;
+    if (session.startedAt !== mountedSessionStartRef.current) return;
+    reportedRef.current = true;
+    if (session.lastResults.stoppedByUser) {
+      onStop(session.lastResults);
+    } else {
+      onComplete(session.lastResults);
+    }
+  }, [session.active, session.lastResults, session.startedAt, onStop, onComplete]);
 
-    const runTestingCycle = async () => {
-      if (isStoppedRef.current || !isActive) return;
+  const totalPlannedSeconds = Math.max(10, config.durationMins * 60);
+  const clock = session.active ? now : session.finishedAt ?? now;
+  const startedAt = session.startedAt ?? clock;
+  const endsAt = session.endsAt ?? clock;
+  const elapsedSeconds = Math.min(
+    totalPlannedSeconds,
+    Math.max(0, Math.floor((clock - startedAt) / 1000))
+  );
+  const secondsRemaining = Math.max(0, Math.ceil((endsAt - clock) / 1000));
+  const currentCycle = Math.max(1, session.currentCycle);
+  const phase: 'testing' | 'waiting' | 'gap' =
+    session.phase === 'gap' ? 'gap' : session.phase === 'waiting' ? 'waiting' : 'testing';
+  const gapRemaining = session.gapEndsAt
+    ? Math.max(0, Math.ceil((session.gapEndsAt - now) / 1000))
+    : config.gapSeconds;
+  const completedCycles = session.cycles;
+  const livePrimary = session.livePrimary;
+  const liveSecondary = session.liveSecondary;
+  const liveProgress = session.liveProgress;
 
-      // 1. Enter testing phase
-      setPhase('testing');
-      setLiveProgress(0);
+  const handleManualStop = async () => {
+    if (reportedRef.current) return;
+    reportedRef.current = true;
+    const res = await continuousTestService.stop();
+    if (res) {
+      onStop(res);
+    }
+  };
 
-      // Simulate cycle progression across 4.5 seconds
-      const testSteps = 9;
-      const baseSpeed = status.lastSample?.down_mbps ?? 52.4;
-
-      for (let i = 1; i <= testSteps; i++) {
-        await new Promise<void>(resolve => setTimeout(() => resolve(), 500));
-        if (isStoppedRef.current || !isActive) return;
-
-        setLiveProgress(Math.round((i / testSteps) * 100));
-
-        if (config.testType === 'speed') {
-          // Variance around base speed
-          const jitter = (Math.random() * 8 - 4);
-          const currentVal = Math.max(10, baseSpeed + jitter + i * 0.5);
-          setLivePrimary(`${currentVal.toFixed(1)} Mbps`);
-          setLiveSecondary(`Ping: ${Math.round(18 + Math.random() * 4)} ms`);
-        } else if (config.testType === 'coverage') {
-          const dbmVal = -56 - Math.round(Math.random() * 6);
-          setLivePrimary(`${dbmVal} dBm`);
-          setLiveSecondary(dbmVal > -70 ? 'Excellent Signal' : 'Good Signal');
-        } else {
-          // video_browser
-          const loadTime = (1.05 + Math.random() * 0.35).toFixed(2);
-          setLivePrimary(`${loadTime}s`);
-          setLiveSecondary('1080p • Buffer 98%');
-        }
-      }
-
-      // Finish this cycle
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      let newCycle: CycleResult;
-
-      if (config.testType === 'speed') {
-        const measured = +(baseSpeed + (Math.random() * 6 - 3)).toFixed(1);
-        const upMeasured = +(measured * 0.4 + (Math.random() * 2)).toFixed(1);
-        newCycle = {
-          cycleNumber: currentCycle,
-          timestamp: timeStr,
-          primaryMetric: `${measured} Mbps`,
-          primaryLabel: 'Download',
-          secondaryMetric: `${upMeasured} Mbps`,
-          secondaryLabel: 'Upload',
-          extraInfo: `Ping: ${Math.round(17 + Math.random() * 4)} ms`,
-          numericVal: measured,
-        };
-      } else if (config.testType === 'coverage') {
-        const measuredDbm = -58 - Math.round(Math.random() * 4);
-        newCycle = {
-          cycleNumber: currentCycle,
-          timestamp: timeStr,
-          primaryMetric: `${measuredDbm} dBm`,
-          primaryLabel: 'Signal',
-          secondaryMetric: 'Excellent',
-          secondaryLabel: 'Quality',
-          extraInfo: 'Wi-Fi 5GHz • Sector 4',
-          numericVal: measuredDbm,
-        };
-      } else {
-        const measuredLoad = +(1.1 + Math.random() * 0.25).toFixed(2);
-        newCycle = {
-          cycleNumber: currentCycle,
-          timestamp: timeStr,
-          primaryMetric: `${measuredLoad}s`,
-          primaryLabel: 'Load Time',
-          secondaryMetric: '1080p 60fps',
-          secondaryLabel: 'Stream',
-          extraInfo: 'Buffer: 99%',
-          numericVal: measuredLoad,
-        };
-      }
-
-      setCompletedCycles(prev => [newCycle, ...prev]);
-
-      // 2. Enter gap cooling phase
-      setPhase('gap');
-      const gapSecs = Math.max(3, config.gapSeconds);
-      setGapRemaining(gapSecs);
-
-      for (let g = gapSecs; g > 0; g--) {
-        setGapRemaining(g);
-        await new Promise<void>(resolve => setTimeout(() => resolve(), 1000));
-        if (isStoppedRef.current || !isActive) return;
-      }
-
-      // Next cycle
-      setCurrentCycle(prev => prev + 1);
-    };
-
-    runTestingCycle();
-
-    return () => {
-      isActive = false;
-    };
-  }, [currentCycle, config.testType, config.gapSeconds, status.lastSample?.down_mbps]);
-
-  const handleManualStop = () => {
-    finishSession(true);
+  // Back arrow leaves the screen; the session keeps running in the background
+  const handleBack = () => {
+    if (onMinimize) {
+      onMinimize();
+    } else {
+      handleManualStop();
+    }
   };
 
   const formatTime = (secs: number) => {
@@ -415,7 +201,7 @@ export const ContinuousTestProgressView: React.FC<ContinuousTestProgressViewProp
     <SafeAreaView style={styles.safeArea}>
       {/* Top Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={handleManualStop} activeOpacity={0.7}>
+        <TouchableOpacity style={styles.backBtn} onPress={handleBack} activeOpacity={0.7}>
           <BackArrowIcon size={22} color="#0F172A" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Continuous Testing</Text>
@@ -455,7 +241,11 @@ export const ContinuousTestProgressView: React.FC<ContinuousTestProgressViewProp
                   styles.phaseText,
                   phase === 'testing' ? styles.phaseTesting : styles.phaseGap,
                 ]}>
-                {phase === 'testing' ? '● RUNNING TEST' : `⏳ GAP WAITING (${gapRemaining}s)`}
+                {phase === 'testing'
+                  ? '● RUNNING TEST'
+                  : phase === 'waiting'
+                  ? '⏸ QUEUED'
+                  : `⏳ GAP WAITING (${gapRemaining}s)`}
               </Text>
             </View>
           </View>
@@ -469,23 +259,23 @@ export const ContinuousTestProgressView: React.FC<ContinuousTestProgressViewProp
                 styles.metricCircleRingBase,
               ]}>
               <Text style={[styles.livePrimaryNumber, { color: testInfo.accentColor }]}>
-                {phase === 'testing' ? livePrimary : `${gapRemaining}s`}
+                {phase === 'gap' ? `${gapRemaining}s` : livePrimary}
               </Text>
               <Text style={styles.livePrimaryLabel}>
-                {phase === 'testing'
-                  ? config.testType === 'speed'
-                    ? 'Current Speed'
-                    : config.testType === 'coverage'
-                    ? 'Current Signal'
-                    : 'Load Time'
-                  : 'Next Cycle In'}
+                {phase === 'gap'
+                  ? 'Next Cycle In'
+                  : config.testType === 'speed'
+                  ? 'Current Speed'
+                  : config.testType === 'coverage'
+                  ? 'Network'
+                  : 'Load Time'}
               </Text>
             </Animated.View>
           </View>
 
           {/* Subtext info */}
           <Text style={styles.liveSecondaryText}>
-            {phase === 'testing' ? liveSecondary : `Cooling interval before Cycle #${currentCycle + 1}`}
+            {phase === 'gap' ? `Cooling interval before Cycle #${currentCycle + 1}` : liveSecondary}
           </Text>
 
           {/* Progress Bar */}
@@ -494,7 +284,7 @@ export const ContinuousTestProgressView: React.FC<ContinuousTestProgressViewProp
               style={[
                 styles.progressBarFill,
                 {
-                  width: `${phase === 'testing' ? liveProgress : Math.round(((config.gapSeconds - gapRemaining) / config.gapSeconds) * 100)}%`,
+                  width: `${phase !== 'gap' ? liveProgress : Math.min(100, Math.max(0, Math.round(((config.gapSeconds - gapRemaining) / config.gapSeconds) * 100)))}%`,
                   backgroundColor: testInfo.accentColor,
                 },
               ]}

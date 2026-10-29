@@ -50,6 +50,18 @@ import {
   ChevronRightIcon,
 } from './Icons';
 import { useTranslation } from '../i18n';
+import {
+  continuousTestService,
+  useContinuousSession,
+} from '../services/continuousTestService';
+import {
+  scheduledTestService,
+  useScheduleState,
+  getNextRunAt,
+} from '../services/scheduledTestService';
+
+const formatScheduleTime = (ts: number) =>
+  new Date(ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 export type TestType = 'speed' | 'video_browser' | 'coverage' | 'advance';
 export type ScreenMode =
@@ -99,10 +111,31 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
   const [showAdvanceModal, setShowAdvanceModal] = useState<boolean>(false);
 
   // Schedule and Continuous Test active states
-  const [activeSchedule, setActiveSchedule] = useState<ScheduledTestConfig | null>(null);
-  const [isContinuousRunning, setIsContinuousRunning] = useState<boolean>(false);
-  const [continuousConfig, setContinuousConfig] = useState<ContinuousTestConfig | null>(null);
+  // Continuous & scheduled tests live in services, so they keep running across
+  // tab switches, screen-off and background; this view only reflects their state.
+  const scheduleState = useScheduleState();
+  const activeSchedule: ScheduledTestConfig | null = scheduleState.config;
+  const scheduleNextRunAt = getNextRunAt(scheduleState);
+  const continuousSession = useContinuousSession();
+  const isContinuousRunning = continuousSession.active;
+  const continuousConfig: ContinuousTestConfig | null = continuousSession.config;
   const [continuousResults, setContinuousResults] = useState<ContinuousTestSessionResults | null>(null);
+  const showContinuousFinished =
+    !continuousSession.active && !!continuousSession.lastResults && !continuousSession.resultsSeen;
+
+  const openContinuousResults = (res: ContinuousTestSessionResults) => {
+    continuousTestService.markResultsSeen();
+    setContinuousResults(res);
+    setScreenMode('continuous_result');
+  };
+
+  const stopContinuous = () => {
+    continuousTestService.stop().then(res => {
+      if (res) {
+        openContinuousResults(res);
+      }
+    });
+  };
   const [nearbyCoverage, setNearbyCoverage] = useState<any>(null);
 
   useEffect(() => {
@@ -324,13 +357,11 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
         activeConfig={continuousConfig}
         onBack={() => setScreenMode('home')}
         onStartTest={cfg => {
-          setIsContinuousRunning(true);
-          setContinuousConfig(cfg);
+          continuousTestService.start(cfg);
           setScreenMode('continuous_testing');
         }}
         onStopTest={() => {
-          setIsContinuousRunning(false);
-          setContinuousConfig(null);
+          continuousTestService.stop().then(() => continuousTestService.markResultsSeen());
           Alert.alert('Continuous Test Stopped', 'Continuous testing has been halted.');
         }}
       />
@@ -343,60 +374,10 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
       <ContinuousTestProgressView
         config={continuousConfig}
         status={status}
-        onStop={res => {
-          setIsContinuousRunning(false);
-          setContinuousResults(res);
-          setScreenMode('continuous_result');
-          const base = status.lastSample;
-          const s: Sample = {
-            id: `adv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            device_id: base?.device_id || 'dev',
-            ts: Math.floor(Date.now() / 1000),
-            down_mbps: base?.down_mbps || 45.2,
-            up_mbps: base?.up_mbps || 18.0,
-            latency_ms: base?.latency_ms || 22,
-            jitter_ms: 6.5,
-            packet_loss_pct: 0,
-            network: base?.network || 'cellular',
-            radio: base?.radio || '5G',
-            carrier: base?.carrier || 'Airtel',
-            device_model: base?.device_model || 'Mobile Device',
-            os_platform: base?.os_platform || 'Mobile OS',
-            location_type: base?.location_type || 'Outdoor',
-            lat: base?.lat ?? null,
-            lng: base?.lng ?? null,
-            accuracy: base?.accuracy ?? null,
-            test_type: 'advance',
-          };
-          sampleStore.add(s);
-        }}
-        onComplete={res => {
-          setIsContinuousRunning(false);
-          setContinuousResults(res);
-          setScreenMode('continuous_result');
-          const base = status.lastSample;
-          const s: Sample = {
-            id: `adv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            device_id: base?.device_id || 'dev',
-            ts: Math.floor(Date.now() / 1000),
-            down_mbps: base?.down_mbps || 48.5,
-            up_mbps: base?.up_mbps || 20.0,
-            latency_ms: base?.latency_ms || 20,
-            jitter_ms: 5.5,
-            packet_loss_pct: 0,
-            network: base?.network || 'cellular',
-            radio: base?.radio || '5G',
-            carrier: base?.carrier || 'Airtel',
-            device_model: base?.device_model || 'Mobile Device',
-            os_platform: base?.os_platform || 'Mobile OS',
-            location_type: base?.location_type || 'Outdoor',
-            lat: base?.lat ?? null,
-            lng: base?.lng ?? null,
-            accuracy: base?.accuracy ?? null,
-            test_type: 'advance',
-          };
-          sampleStore.add(s);
-        }}
+        // Every cycle is saved as its own real sample by continuousTestService
+        onStop={openContinuousResults}
+        onComplete={openContinuousResults}
+        onMinimize={() => setScreenMode('home')}
       />
     );
   }
@@ -409,7 +390,7 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
         onBackToHome={() => setScreenMode('home')}
         onRestartTest={() => {
           if (continuousConfig) {
-            setIsContinuousRunning(true);
+            continuousTestService.start(continuousConfig);
             setScreenMode('continuous_testing');
           } else {
             setScreenMode('continuous_setup');
@@ -427,14 +408,14 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
         activeSchedule={activeSchedule}
         onBack={() => setScreenMode('home')}
         onScheduleTest={cfg => {
-          setActiveSchedule(cfg);
+          scheduledTestService.setSchedule(cfg);
           Alert.alert(
             'Test Scheduled',
             `Your ${cfg.frequency.toUpperCase()} automated test has been scheduled from ${cfg.fromDate} to ${cfg.toDate}.`
           );
         }}
         onDisableSchedule={() => {
-          setActiveSchedule(null);
+          scheduledTestService.clearSchedule();
           Alert.alert(
             'Schedule Disabled',
             'Automated scheduled testing has been disabled.'
@@ -443,6 +424,64 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
       />
     );
   }
+
+  // Active Continuous Test Status & Stop Button (or "finished" shortcut to results)
+  const renderContinuousCard = () => {
+    if (isContinuousRunning && continuousConfig) {
+      const remainingMins = continuousSession.endsAt
+        ? Math.max(0, Math.ceil((continuousSession.endsAt - Date.now()) / 60000))
+        : continuousConfig.durationMins;
+      return (
+        <TouchableOpacity
+          style={styles.activeScheduleDashboardCard}
+          onPress={() => setScreenMode('continuous_testing')}
+          activeOpacity={0.85}>
+          <View style={styles.activeScheduleDashboardLeft}>
+            <View style={styles.statusDotLive} />
+            <View>
+              <Text style={styles.activeScheduleDashboardTitle}>
+                Continuous Testing Active ({continuousConfig.testType.toUpperCase()})
+              </Text>
+              <Text style={styles.activeScheduleDashboardSub}>
+                Interval: {continuousConfig.gapSeconds}s • Duration: {continuousConfig.durationMins}m
+              </Text>
+              <Text style={styles.activeScheduleDashboardSub}>
+                Cycle #{Math.max(1, continuousSession.currentCycle)} • ~{remainingMins}m left • Tap to view
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={styles.disableSmallBtn}
+            onPress={stopContinuous}
+            activeOpacity={0.8}>
+            <Text style={styles.disableSmallBtnText}>Stop</Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      );
+    }
+    if (showContinuousFinished && continuousSession.lastResults) {
+      const res = continuousSession.lastResults;
+      return (
+        <TouchableOpacity
+          style={styles.activeScheduleDashboardCard}
+          onPress={() => openContinuousResults(res)}
+          activeOpacity={0.85}>
+          <View style={styles.activeScheduleDashboardLeft}>
+            <View>
+              <Text style={styles.activeScheduleDashboardTitle}>
+                Continuous Test Finished ({res.testType.toUpperCase()})
+              </Text>
+              <Text style={styles.activeScheduleDashboardSub}>
+                {res.totalCyclesCompleted} cycles • Tap to view results
+              </Text>
+            </View>
+          </View>
+          <ChevronRightIcon size={18} color="#64748B" />
+        </TouchableOpacity>
+      );
+    }
+    return null;
+  };
 
   // 3. RENDER MAIN HOME TAB (Clean, with START button and 4 test buttons)
   return (
@@ -805,12 +844,25 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
                   <Text style={styles.activeScheduleDashboardSub}>
                     {activeSchedule.fromDate} to {activeSchedule.toDate}
                   </Text>
+                  <Text style={styles.activeScheduleDashboardSub}>
+                    {scheduleState.isRunning
+                      ? 'Running scheduled test now...'
+                      : scheduleNextRunAt
+                      ? `Next: ${scheduleNextRunAt <= Date.now() ? 'due now' : formatScheduleTime(scheduleNextRunAt)}`
+                      : 'Schedule finished'}
+                    {scheduleState.lastRunAt
+                      ? ` • Last: ${formatScheduleTime(scheduleState.lastRunAt)}`
+                      : ''}
+                  </Text>
+                  {scheduleState.lastOutcome && (
+                    <Text style={styles.activeScheduleDashboardSub}>{scheduleState.lastOutcome}</Text>
+                  )}
                 </View>
               </View>
               <TouchableOpacity
                 style={styles.disableSmallBtn}
                 onPress={() => {
-                  setActiveSchedule(null);
+                  scheduledTestService.clearSchedule();
                   Alert.alert('Schedule Disabled', 'Automated scheduled testing has been disabled.');
                 }}
                 activeOpacity={0.8}>
@@ -820,33 +872,12 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
           )}
 
           {/* Active Continuous Test Status & Stop Button */}
-          {isContinuousRunning && continuousConfig && (
-            <View style={styles.activeScheduleDashboardCard}>
-              <View style={styles.activeScheduleDashboardLeft}>
-                <View style={styles.statusDotLive} />
-                <View>
-                  <Text style={styles.activeScheduleDashboardTitle}>
-                    Continuous Testing Active ({continuousConfig.testType.toUpperCase()})
-                  </Text>
-                  <Text style={styles.activeScheduleDashboardSub}>
-                    Interval: {continuousConfig.gapSeconds}s • Duration: {continuousConfig.durationMins}m
-                  </Text>
-                </View>
-              </View>
-              <TouchableOpacity
-                style={styles.disableSmallBtn}
-                onPress={() => {
-                  setIsContinuousRunning(false);
-                  setContinuousConfig(null);
-                  Alert.alert('Continuous Test Stopped', 'Continuous testing has been halted.');
-                }}
-                activeOpacity={0.8}>
-                <Text style={styles.disableSmallBtnText}>Stop</Text>
-              </TouchableOpacity>
-            </View>
-          )}
+          {renderContinuousCard()}
         </View>
       )}
+
+      {/* Continuous session keeps running when you leave its screen: show it on every test tab */}
+      {activeTestType !== 'advance' && renderContinuousCard()}
 
       {/* Advance Tests Bottom Sheet Modal (Screenshot 1) */}
       <AdvanceTestModal

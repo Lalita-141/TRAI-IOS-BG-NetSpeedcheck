@@ -16,7 +16,13 @@ export interface Sample {
   lat: number | null;
   lng: number | null;
   accuracy: number | null;
-  test_type?: 'speed' | 'video' | 'coverage' | 'advance' | string;
+  test_type?: 'speed' | 'video' | 'coverage' | 'advance' | 'continuous' | 'scheduled' | string;
+  // Video & Web Browsing QoS (stored by the server's samples table)
+  video_delay_ms?: number | null;
+  web_delay_ms?: number | null;
+  page_load_sec?: number | null;
+  ttfb_ms?: number | null;
+  streaming_quality?: string | null;
 }
 
 export interface AppConfig {

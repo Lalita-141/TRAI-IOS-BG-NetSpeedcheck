@@ -16,6 +16,7 @@ import { monitorService, MonitorStatus } from './src/services/monitorService';
 import { uploader } from './src/services/uploader';
 import { sampleStore } from './src/services/sampleStore';
 import { locationService } from './src/services/locationService';
+import { scheduledTestService } from './src/services/scheduledTestService';
 
 import { SpeedDashboardView } from './src/components/SpeedDashboardView';
 import { CoverageMapView } from './src/components/CoverageMapView';
@@ -81,6 +82,9 @@ function AppContent() {
 
     // Check remote configuration from server
     uploader.fetchRemoteConfig().catch(() => {});
+
+    // Restore saved schedule and start checking for due scheduled tests
+    scheduledTestService.init().catch(() => {});
 
     // Subscribe to monitor service updates
     const unsubscribe = monitorService.subscribe(newStatus => {
