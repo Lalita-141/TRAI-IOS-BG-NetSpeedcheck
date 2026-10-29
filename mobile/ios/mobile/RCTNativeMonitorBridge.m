@@ -37,6 +37,10 @@ RCT_EXTERN_METHOD(releaseKeepAlive:(NSString *)tag
 RCT_EXTERN_METHOD(setSchedule:(NSString *)frequency
                   fromTs:(double)fromTs
                   toTs:(double)toTs
+                  hour:(double)hour
+                  minute:(double)minute
+                  weekday:(double)weekday
+                  monthDay:(double)monthDay
                   serverUrl:(NSString *)serverUrl
                   deviceId:(NSString *)deviceId
                   resolver:(RCTPromiseResolveBlock)resolve

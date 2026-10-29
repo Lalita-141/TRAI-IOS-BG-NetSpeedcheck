@@ -26,13 +26,23 @@ const COLLAPSE_WINDOW_MS = 2 * 60 * 1000;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+export const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
 export interface ScheduleState {
   config: ScheduledTestConfig | null;
-  lastRunPeriod: number | null;
+  lastRunPeriod: number | null; // occurrenceId of the last handled run slot
   lastRunAt: number | null; // ms
   runCount: number;
   lastOutcome: string | null;
   isRunning: boolean;
+}
+
+export interface ScheduleTiming {
+  frequency: ScheduleFrequency;
+  hour: number; // 0-23
+  minute: number; // 0-59
+  weekday: number; // 0 = Sunday ... 6 = Saturday (weekly)
+  monthDay: number; // 1-31, clamped to the month's last day (monthly)
 }
 
 type ScheduleListener = (state: ScheduleState) => void;
@@ -58,47 +68,113 @@ const startOfDay = (ts: number) => {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 };
 
-/**
- * Index of the schedule period containing `now`: one run per calendar day,
- * per 7-day block counted from the start date, or per calendar month.
- * Must stay in sync with NativeMonitorService.schedulePeriodIndex (iOS).
- */
-export function schedulePeriodIndex(frequency: ScheduleFrequency, fromTs: number, now: number): number {
-  if (frequency === 'monthly') {
-    const from = new Date(fromTs);
-    const cur = new Date(now);
-    return cur.getFullYear() * 12 + cur.getMonth() - (from.getFullYear() * 12 + from.getMonth());
-  }
-  const days = Math.round((startOfDay(now) - startOfDay(fromTs)) / DAY_MS);
-  return frequency === 'weekly' ? Math.floor(days / 7) : days;
+export function resolveTiming(config: ScheduledTestConfig): ScheduleTiming {
+  const from = new Date(config.fromTs ?? Date.now());
+  return {
+    frequency: config.frequency,
+    hour: config.hour ?? 9,
+    minute: config.minute ?? 0,
+    weekday: config.weekday ?? from.getDay(),
+    monthDay: config.monthDay ?? from.getDate(),
+  };
 }
 
-function periodStart(frequency: ScheduleFrequency, fromTs: number, index: number): number {
-  const from = new Date(startOfDay(fromTs));
-  if (frequency === 'monthly') {
-    return new Date(from.getFullYear(), from.getMonth() + index, 1).getTime();
+const atTime = (year: number, month: number, day: number, t: ScheduleTiming) =>
+  new Date(year, month, day, t.hour, t.minute, 0, 0).getTime();
+
+const monthOccurrence = (year: number, month: number, t: ScheduleTiming) => {
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  return atTime(year, month, Math.min(t.monthDay, daysInMonth), t);
+};
+
+/**
+ * Most recent scheduled run time at or before `now`.
+ * Must stay in sync with NativeMonitorService.scheduleOccurrence(onOrBefore:) (iOS).
+ */
+export function latestOccurrence(t: ScheduleTiming, now: number): number {
+  const d = new Date(now);
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const day = d.getDate();
+  if (t.frequency === 'monthly') {
+    const c = monthOccurrence(y, m, t);
+    return c <= now ? c : monthOccurrence(y, m - 1, t);
   }
-  const d = new Date(from);
-  d.setDate(d.getDate() + (frequency === 'weekly' ? index * 7 : index));
-  return d.getTime();
+  if (t.frequency === 'weekly') {
+    const diff = (d.getDay() - t.weekday + 7) % 7;
+    const c = atTime(y, m, day - diff, t);
+    return c <= now ? c : atTime(y, m, day - diff - 7, t);
+  }
+  const c = atTime(y, m, day, t);
+  return c <= now ? c : atTime(y, m, day - 1, t);
+}
+
+/** First scheduled run time strictly after `after`. */
+export function nextOccurrence(t: ScheduleTiming, after: number): number {
+  const d = new Date(after);
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const day = d.getDate();
+  if (t.frequency === 'monthly') {
+    const c = monthOccurrence(y, m, t);
+    return c > after ? c : monthOccurrence(y, m + 1, t);
+  }
+  if (t.frequency === 'weekly') {
+    const diff = (t.weekday - d.getDay() + 7) % 7;
+    const c = atTime(y, m, day + diff, t);
+    return c > after ? c : atTime(y, m, day + diff + 7, t);
+  }
+  const c = atTime(y, m, day, t);
+  return c > after ? c : atTime(y, m, day + 1, t);
+}
+
+/** Stable id of a run slot (minutes since epoch). Same formula on the native side. */
+export const occurrenceId = (ts: number) => Math.floor(ts / 60000);
+
+/** The run slot that should be handled now, or null if nothing is due. */
+export function dueOccurrence(state: ScheduleState, now: number = Date.now()): number | null {
+  const config = state.config;
+  if (!config || config.fromTs == null || config.toTs == null) return null;
+  if (now < config.fromTs || now > config.toTs) return null;
+  const latest = latestOccurrence(resolveTiming(config), now);
+  if (latest < config.fromTs) return null;
+  return state.lastRunPeriod === occurrenceId(latest) ? null : latest;
+}
+
+/** When the next scheduled run happens (`now` if one is due), or null if the schedule is over. */
+export function getNextRunAt(state: ScheduleState, now: number = Date.now()): number | null {
+  const config = state.config;
+  if (!config || config.fromTs == null || config.toTs == null) return null;
+  if (now > config.toTs) return null;
+  if (dueOccurrence(state, now) != null) return now;
+  const next = nextOccurrence(resolveTiming(config), Math.max(now, config.fromTs - 1));
+  return next <= config.toTs ? next : null;
+}
+
+export function formatClock(hour: number, minute: number): string {
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${h12}:${minute.toString().padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`;
+}
+
+const ordinal = (n: number) => {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
+};
+
+/** e.g. "Daily at 9:30 AM", "Every Monday at 9:30 AM", "Monthly on the 15th at 9:30 AM" */
+export function describeSchedule(config: ScheduledTestConfig): string {
+  const t = resolveTiming(config);
+  const time = formatClock(t.hour, t.minute);
+  if (t.frequency === 'weekly') return `Every ${WEEKDAY_NAMES[t.weekday]} at ${time}`;
+  if (t.frequency === 'monthly') return `Monthly on the ${ordinal(t.monthDay)} at ${time}`;
+  return `Daily at ${time}`;
 }
 
 function withTimestamps(config: ScheduledTestConfig): ScheduledTestConfig {
   const fromTs = config.fromTs ?? startOfDay(Date.now());
   const toTs = config.toTs ?? startOfDay(Date.now()) + 8 * DAY_MS - 1;
-  return { ...config, fromTs, toTs };
-}
-
-/** Earliest time the next scheduled run may happen, or null if the schedule is over. */
-export function getNextRunAt(state: ScheduleState, now: number = Date.now()): number | null {
-  const config = state.config;
-  if (!config || config.fromTs == null || config.toTs == null) return null;
-  if (now > config.toTs) return null;
-  if (now < config.fromTs) return config.fromTs;
-  const idx = schedulePeriodIndex(config.frequency, config.fromTs, now);
-  if (state.lastRunPeriod !== idx) return now;
-  const next = periodStart(config.frequency, config.fromTs, idx + 1);
-  return next <= config.toTs ? next : null;
+  return { ...config, ...resolveTiming({ ...config, fromTs }), fromTs, toTs };
 }
 
 function nativeBridge() {
@@ -111,7 +187,6 @@ class ScheduledTestService {
   private listeners: Set<ScheduleListener> = new Set();
   private initPromise: Promise<void> | null = null;
   private checking = false;
-  private timer: any = null;
 
   getState(): ScheduleState {
     return this.state;
@@ -132,13 +207,13 @@ class ScheduledTestService {
         await this.load();
         await this.syncFromNative();
 
-        this.timer = setInterval(() => {
+        setInterval(() => {
           this.checkAndRun();
         }, CHECK_INTERVAL_MS);
 
         AppState.addEventListener('change', nextState => {
           if (nextState === 'active') {
-            this.syncFromNative().then(() => this.checkAndRun());
+            this.checkAndRun();
           }
         });
 
@@ -151,7 +226,14 @@ class ScheduledTestService {
   async setSchedule(config: ScheduledTestConfig): Promise<void> {
     await this.init();
     const full = withTimestamps(config);
-    this.setState({ ...EMPTY_STATE, config: full });
+    const now = Date.now();
+
+    // A run time that already passed today (or this week / month) before the
+    // schedule was created is skipped: the first run is the next upcoming slot.
+    const latest = latestOccurrence(resolveTiming(full), now);
+    const skipped = now >= full.fromTs! && latest >= full.fromTs! ? occurrenceId(latest) : null;
+
+    this.setState({ ...EMPTY_STATE, config: full, lastRunPeriod: skipped });
     await this.persist();
 
     const bridge = nativeBridge();
@@ -163,9 +245,16 @@ class ScheduledTestService {
           full.frequency,
           full.fromTs! / 1000,
           full.toTs! / 1000,
+          full.hour,
+          full.minute,
+          full.weekday,
+          full.monthDay,
           appConfig.serverUrl,
           deviceId
         );
+        if (skipped != null) {
+          await bridge.markScheduledRun(skipped, now / 1000);
+        }
       } catch (e) {
         console.warn('NativeMonitorBridge.setSchedule error:', e);
       }
@@ -184,19 +273,23 @@ class ScheduledTestService {
     }
   }
 
-  /** Runs the scheduled test if one is due in the current period. */
+  /** Runs the scheduled test if its run time has arrived and it hasn't run yet. */
   async checkAndRun(): Promise<void> {
     const config = this.state.config;
-    if (this.checking || !config || config.fromTs == null || config.toTs == null) return;
-
-    const now = Date.now();
-    if (now < config.fromTs || now > config.toTs) return;
-    const period = schedulePeriodIndex(config.frequency, config.fromTs, now);
-    if (this.state.lastRunPeriod === period) return;
+    if (this.checking || !config) return;
+    if (dueOccurrence(this.state) == null) return;
 
     this.checking = true;
-    this.setState({ isRunning: true });
     try {
+      // The native iOS side may have already handled this slot (or be testing it right now)
+      const nativeBusy = await this.syncFromNative();
+      if (nativeBusy) return; // retried on the next check
+      const occurrence = dueOccurrence(this.state);
+      if (occurrence == null || this.state.config !== config) return;
+      const period = occurrenceId(occurrence);
+
+      this.setState({ isRunning: true });
+
       // Location first, outside the exclusive test slot
       const loc = await locationService.getCurrentLocation();
 
@@ -270,24 +363,30 @@ class ScheduledTestService {
     }
   }
 
-  /** Picks up runs the native iOS background task performed while JS was not running. */
-  private async syncFromNative() {
+  /**
+   * Picks up runs the native iOS side performed while JS was not running.
+   * Returns true while a native test is in progress.
+   */
+  private async syncFromNative(): Promise<boolean> {
     const bridge = nativeBridge();
-    if (!this.state.config || !bridge || typeof bridge.getScheduleState !== 'function') return;
+    if (!this.state.config || !bridge || typeof bridge.getScheduleState !== 'function') return false;
     try {
       const native = await bridge.getScheduleState();
       const nativePeriod = typeof native?.lastRunPeriod === 'number' ? native.lastRunPeriod : -1;
       if (nativePeriod >= 0 && (this.state.lastRunPeriod == null || nativePeriod > this.state.lastRunPeriod)) {
+        const ranByNative = native.lastRunAt && native.lastRunAt * 1000 > (this.state.lastRunAt ?? 0);
         this.setState({
           lastRunPeriod: nativePeriod,
           lastRunAt: native.lastRunAt ? native.lastRunAt * 1000 : Date.now(),
-          runCount: this.state.runCount + 1,
-          lastOutcome: 'Ran in background',
+          runCount: this.state.runCount + (ranByNative ? 1 : 0),
+          lastOutcome: ranByNative ? 'Ran in background' : this.state.lastOutcome,
         });
         await this.persist();
       }
+      return native?.isTesting === true;
     } catch (e) {
       console.warn('NativeMonitorBridge.getScheduleState error:', e);
+      return false;
     }
   }
 

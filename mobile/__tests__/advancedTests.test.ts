@@ -8,7 +8,12 @@ jest.mock('@react-native-community/geolocation', () => ({}));
 
 import { testCoordinator } from '../src/services/testCoordinator';
 import {
-  schedulePeriodIndex,
+  latestOccurrence,
+  nextOccurrence,
+  occurrenceId,
+  dueOccurrence,
+  describeSchedule,
+  ScheduleTiming,
   getNextRunAt,
   ScheduleState,
 } from '../src/services/scheduledTestService';
@@ -60,32 +65,62 @@ describe('testCoordinator', () => {
   });
 });
 
-describe('schedulePeriodIndex', () => {
-  const from = new Date(2026, 9, 29, 0, 0, 0).getTime(); // Oct 29 2026
+const ts = (y: number, mo: number, d: number, h = 0, mi = 0) => new Date(y, mo, d, h, mi).getTime();
+const timing = (patch: Partial<ScheduleTiming>): ScheduleTiming => ({
+  frequency: 'daily',
+  hour: 9,
+  minute: 30,
+  weekday: 1,
+  monthDay: 15,
+  ...patch,
+});
 
-  it('daily: one period per calendar day', () => {
-    expect(schedulePeriodIndex('daily', from, new Date(2026, 9, 29, 23, 59).getTime())).toBe(0);
-    expect(schedulePeriodIndex('daily', from, new Date(2026, 9, 30, 0, 1).getTime())).toBe(1);
-    expect(schedulePeriodIndex('daily', from, new Date(2026, 10, 2, 12).getTime())).toBe(4);
+describe('schedule run times', () => {
+  // Oct 29 2026 is a Thursday
+  it('daily: today at the time, else yesterday / tomorrow', () => {
+    const t = timing({});
+    expect(latestOccurrence(t, ts(2026, 9, 29, 10))).toBe(ts(2026, 9, 29, 9, 30));
+    expect(latestOccurrence(t, ts(2026, 9, 29, 9, 0))).toBe(ts(2026, 9, 28, 9, 30));
+    expect(nextOccurrence(t, ts(2026, 9, 29, 9, 0))).toBe(ts(2026, 9, 29, 9, 30));
+    expect(nextOccurrence(t, ts(2026, 9, 29, 9, 30))).toBe(ts(2026, 9, 30, 9, 30));
   });
 
-  it('weekly: 7-day blocks from the start date', () => {
-    expect(schedulePeriodIndex('weekly', from, new Date(2026, 10, 4, 12).getTime())).toBe(0);
-    expect(schedulePeriodIndex('weekly', from, new Date(2026, 10, 5, 0, 1).getTime())).toBe(1);
+  it('weekly: selected weekday at the time', () => {
+    const t = timing({ frequency: 'weekly', weekday: 1 }); // Monday
+    expect(latestOccurrence(t, ts(2026, 9, 29, 12))).toBe(ts(2026, 9, 26, 9, 30));
+    expect(nextOccurrence(t, ts(2026, 9, 29, 12))).toBe(ts(2026, 10, 2, 9, 30));
+    expect(nextOccurrence(t, ts(2026, 10, 2, 9, 30))).toBe(ts(2026, 10, 9, 9, 30));
   });
 
-  it('monthly: calendar months', () => {
-    expect(schedulePeriodIndex('monthly', from, new Date(2026, 9, 31).getTime())).toBe(0);
-    expect(schedulePeriodIndex('monthly', from, new Date(2026, 10, 1).getTime())).toBe(1);
-    expect(schedulePeriodIndex('monthly', from, new Date(2027, 0, 15).getTime())).toBe(3);
+  it('monthly: selected day, clamped to short months', () => {
+    const t = timing({ frequency: 'monthly', monthDay: 31, hour: 18, minute: 0 });
+    expect(nextOccurrence(t, ts(2026, 9, 29))).toBe(ts(2026, 9, 31, 18));
+    expect(nextOccurrence(t, ts(2026, 9, 31, 18))).toBe(ts(2026, 10, 30, 18)); // November has 30 days
+    expect(latestOccurrence(t, ts(2027, 1, 10))).toBe(ts(2027, 0, 31, 18));
+    expect(nextOccurrence(t, ts(2027, 1, 10))).toBe(ts(2027, 1, 28, 18)); // February
+  });
+
+  it('describes the schedule', () => {
+    const base = { fromDate: '', toDate: '', hour: 21, minute: 5 };
+    expect(describeSchedule({ ...base, frequency: 'daily' })).toBe('Daily at 9:05 PM');
+    expect(describeSchedule({ ...base, frequency: 'weekly', weekday: 0 })).toBe('Every Sunday at 9:05 PM');
+    expect(describeSchedule({ ...base, frequency: 'monthly', monthDay: 2 })).toBe('Monthly on the 2nd at 9:05 PM');
   });
 });
 
-describe('getNextRunAt', () => {
-  const fromTs = new Date(2026, 9, 29, 0, 0, 0).getTime();
+describe('due / next run', () => {
+  const fromTs = ts(2026, 9, 29);
   const toTs = new Date(2026, 10, 4, 23, 59, 59, 999).getTime();
   const base: ScheduleState = {
-    config: { frequency: 'daily', fromDate: 'Oct 29', toDate: 'Nov 4', fromTs, toTs },
+    config: {
+      frequency: 'daily',
+      fromDate: 'Oct 29',
+      toDate: 'Nov 4',
+      fromTs,
+      toTs,
+      hour: 9,
+      minute: 30,
+    },
     lastRunPeriod: null,
     lastRunAt: null,
     runCount: 0,
@@ -93,18 +128,24 @@ describe('getNextRunAt', () => {
     isRunning: false,
   };
 
-  it('is due immediately when the current period has not run', () => {
-    const now = new Date(2026, 9, 29, 10).getTime();
-    expect(getNextRunAt(base, now)).toBe(now);
+  it('not due before the run time', () => {
+    const now = ts(2026, 9, 29, 9, 0);
+    expect(dueOccurrence(base, now)).toBeNull();
+    expect(getNextRunAt(base, now)).toBe(ts(2026, 9, 29, 9, 30));
   });
 
-  it('moves to the next day once today has run', () => {
-    const now = new Date(2026, 9, 29, 10).getTime();
-    expect(getNextRunAt({ ...base, lastRunPeriod: 0 }, now)).toBe(new Date(2026, 9, 30).getTime());
+  it('due once the run time passes, until it is marked', () => {
+    const now = ts(2026, 9, 29, 9, 31);
+    expect(dueOccurrence(base, now)).toBe(ts(2026, 9, 29, 9, 30));
+    const ran = { ...base, lastRunPeriod: occurrenceId(ts(2026, 9, 29, 9, 30)) };
+    expect(dueOccurrence(ran, now)).toBeNull();
+    expect(getNextRunAt(ran, now)).toBe(ts(2026, 9, 30, 9, 30));
   });
 
   it('ends after the last day', () => {
-    const now = new Date(2026, 10, 4, 10).getTime();
-    expect(getNextRunAt({ ...base, lastRunPeriod: 6 }, now)).toBeNull();
+    const now = ts(2026, 10, 4, 10);
+    const ran = { ...base, lastRunPeriod: occurrenceId(ts(2026, 10, 4, 9, 30)) };
+    expect(getNextRunAt(ran, now)).toBeNull();
   });
 });
+

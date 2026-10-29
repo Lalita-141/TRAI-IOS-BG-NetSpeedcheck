@@ -58,6 +58,7 @@ import {
   scheduledTestService,
   useScheduleState,
   getNextRunAt,
+  describeSchedule,
 } from '../services/scheduledTestService';
 
 const formatScheduleTime = (ts: number) =>
@@ -411,7 +412,7 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
           scheduledTestService.setSchedule(cfg);
           Alert.alert(
             'Test Scheduled',
-            `Your ${cfg.frequency.toUpperCase()} automated test has been scheduled from ${cfg.fromDate} to ${cfg.toDate}.`
+            `Your automated test runs ${describeSchedule(cfg)}, from ${cfg.fromDate} to ${cfg.toDate}.`
           );
         }}
         onDisableSchedule={() => {
@@ -842,7 +843,7 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
                     Scheduled Testing Active ({activeSchedule.frequency.toUpperCase()})
                   </Text>
                   <Text style={styles.activeScheduleDashboardSub}>
-                    {activeSchedule.fromDate} to {activeSchedule.toDate}
+                    {describeSchedule(activeSchedule)} • {activeSchedule.fromDate} to {activeSchedule.toDate}
                   </Text>
                   <Text style={styles.activeScheduleDashboardSub}>
                     {scheduleState.isRunning

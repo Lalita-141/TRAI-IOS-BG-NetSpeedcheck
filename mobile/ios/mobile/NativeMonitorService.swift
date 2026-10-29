@@ -28,6 +28,10 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
     private let scheduleServerUrlKey = "nm_schedule_server_url"
     private let scheduleLastPeriodKey = "nm_schedule_last_period"
     private let scheduleLastRunAtKey = "nm_schedule_last_run_at"
+    private let scheduleHourKey = "nm_schedule_hour"
+    private let scheduleMinuteKey = "nm_schedule_minute"
+    private let scheduleWeekdayKey = "nm_schedule_weekday"
+    private let scheduleMonthDayKey = "nm_schedule_month_day"
 
     private var configuredDeviceId: String {
         get {
@@ -98,7 +102,13 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
     func scheduleAppRefresh() {
         if #available(iOS 13.0, *) {
             let request = BGAppRefreshTaskRequest(identifier: "com.rnt.speedmonitor.refresh")
-            request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
+            var earliest = Date(timeIntervalSinceNow: 15 * 60)
+            // Ask iOS to wake us at the next scheduled run time (iOS still decides the exact moment)
+            let monitoringEnabled = isMonitoring || defaults.bool(forKey: monitoringEnabledKey)
+            if let nextRun = nextScheduleRunDate(), !monitoringEnabled || nextRun < earliest {
+                earliest = max(nextRun, Date(timeIntervalSinceNow: 60))
+            }
+            request.earliestBeginDate = earliest
             try? BGTaskScheduler.shared.submit(request)
         }
     }
@@ -129,6 +139,8 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
                 testType: duePeriod != nil ? "scheduled" : nil,
                 useFallbackLocation: duePeriod == nil
             )
+            // Re-aim the next wake-up now that this run is recorded
+            self.scheduleAppRefresh()
             task.setTaskCompleted(success: true)
         }
     }
@@ -149,10 +161,15 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
         return defaults.string(forKey: scheduleFrequencyKey) != nil
     }
 
-    func setSchedule(frequency: String, fromTs: Double, toTs: Double, serverUrl: String, deviceId: String?) {
+    func setSchedule(frequency: String, fromTs: Double, toTs: Double, hour: Int, minute: Int, weekday: Int, monthDay: Int,
+                     serverUrl: String, deviceId: String?) {
         defaults.set(frequency, forKey: scheduleFrequencyKey)
         defaults.set(fromTs, forKey: scheduleFromKey)
         defaults.set(toTs, forKey: scheduleToKey)
+        defaults.set(hour, forKey: scheduleHourKey)
+        defaults.set(minute, forKey: scheduleMinuteKey)
+        defaults.set(weekday, forKey: scheduleWeekdayKey)
+        defaults.set(monthDay, forKey: scheduleMonthDayKey)
         defaults.set(serverUrl, forKey: scheduleServerUrlKey)
         defaults.removeObject(forKey: scheduleLastPeriodKey)
         defaults.removeObject(forKey: scheduleLastRunAtKey)
@@ -164,7 +181,8 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
 
     func clearSchedule() {
         for key in [scheduleFrequencyKey, scheduleFromKey, scheduleToKey, scheduleServerUrlKey,
-                    scheduleLastPeriodKey, scheduleLastRunAtKey] {
+                    scheduleLastPeriodKey, scheduleLastRunAtKey, scheduleHourKey, scheduleMinuteKey,
+                    scheduleWeekdayKey, scheduleMonthDayKey] {
             defaults.removeObject(forKey: key)
         }
     }
@@ -172,6 +190,7 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
     func markScheduledRun(period: Int, at: Double) {
         defaults.set(period, forKey: scheduleLastPeriodKey)
         defaults.set(at, forKey: scheduleLastRunAtKey)
+        scheduleAppRefresh()
     }
 
     func scheduleState() -> [String: Any] {
@@ -181,34 +200,117 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
             "active": hasActiveSchedule,
             "lastRunPeriod": lastPeriod,
             "lastRunAt": defaults.double(forKey: scheduleLastRunAtKey),
+            "isTesting": isTesting,
         ]
     }
 
-    /// Period index containing `date` (one per calendar day / 7-day block / calendar month),
-    /// or nil outside the schedule window. Must match schedulePeriodIndex in scheduledTestService.ts.
-    private func schedulePeriodIndex(for date: Date) -> Int? {
-        guard let frequency = defaults.string(forKey: scheduleFrequencyKey) else { return nil }
-        let from = Date(timeIntervalSince1970: defaults.double(forKey: scheduleFromKey))
-        let to = Date(timeIntervalSince1970: defaults.double(forKey: scheduleToKey))
-        guard date >= from, date <= to else { return nil }
+    // Run-time math below must match latestOccurrence / nextOccurrence / occurrenceId
+    // in scheduledTestService.ts. A run slot's id is its time in minutes since epoch.
 
-        let cal = Calendar.current
-        if frequency == "monthly" {
-            let a = cal.dateComponents([.year, .month], from: from)
-            let b = cal.dateComponents([.year, .month], from: date)
-            return ((b.year ?? 0) * 12 + (b.month ?? 0)) - ((a.year ?? 0) * 12 + (a.month ?? 0))
-        }
-        let days = cal.dateComponents([.day], from: cal.startOfDay(for: from), to: cal.startOfDay(for: date)).day ?? 0
-        return frequency == "weekly" ? days / 7 : days
+    private struct ScheduleTiming {
+        let frequency: String
+        let hour: Int
+        let minute: Int
+        let weekday: Int // 0 = Sunday ... 6 = Saturday
+        let monthDay: Int // 1-31, clamped to the month's last day
     }
 
+    private var scheduleTiming: ScheduleTiming? {
+        guard let frequency = defaults.string(forKey: scheduleFrequencyKey) else { return nil }
+        return ScheduleTiming(
+            frequency: frequency,
+            hour: defaults.integer(forKey: scheduleHourKey),
+            minute: defaults.integer(forKey: scheduleMinuteKey),
+            weekday: defaults.integer(forKey: scheduleWeekdayKey),
+            monthDay: max(1, defaults.integer(forKey: scheduleMonthDayKey))
+        )
+    }
+
+    private func at(_ day: Date, _ t: ScheduleTiming) -> Date {
+        return Calendar.current.date(bySettingHour: t.hour, minute: t.minute, second: 0, of: day) ?? day
+    }
+
+    private func monthOccurrence(_ month: DateComponents, _ t: ScheduleTiming) -> Date {
+        let cal = Calendar.current
+        let first = cal.date(from: DateComponents(year: month.year, month: month.month, day: 1)) ?? Date()
+        let daysInMonth = cal.range(of: .day, in: .month, for: first)?.count ?? 28
+        let comps = DateComponents(year: month.year, month: month.month, day: min(t.monthDay, daysInMonth),
+                                   hour: t.hour, minute: t.minute, second: 0)
+        return cal.date(from: comps) ?? first
+    }
+
+    private func shiftMonth(_ month: DateComponents, by value: Int) -> DateComponents {
+        let cal = Calendar.current
+        let first = cal.date(from: DateComponents(year: month.year, month: month.month, day: 1)) ?? Date()
+        let shifted = cal.date(byAdding: .month, value: value, to: first) ?? first
+        return cal.dateComponents([.year, .month], from: shifted)
+    }
+
+    /// Most recent scheduled run time at or before `date`.
+    private func scheduleOccurrence(onOrBefore date: Date, _ t: ScheduleTiming) -> Date {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: date)
+        switch t.frequency {
+        case "monthly":
+            let thisMonth = cal.dateComponents([.year, .month], from: date)
+            let c = monthOccurrence(thisMonth, t)
+            return c <= date ? c : monthOccurrence(shiftMonth(thisMonth, by: -1), t)
+        case "weekly":
+            let diff = ((cal.component(.weekday, from: date) - 1) - t.weekday + 7) % 7
+            let day = cal.date(byAdding: .day, value: -diff, to: today) ?? today
+            let c = at(day, t)
+            return c <= date ? c : at(cal.date(byAdding: .day, value: -7, to: day) ?? day, t)
+        default:
+            let c = at(today, t)
+            return c <= date ? c : at(cal.date(byAdding: .day, value: -1, to: today) ?? today, t)
+        }
+    }
+
+    /// First scheduled run time strictly after `date`.
+    private func scheduleOccurrence(after date: Date, _ t: ScheduleTiming) -> Date {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: date)
+        switch t.frequency {
+        case "monthly":
+            let thisMonth = cal.dateComponents([.year, .month], from: date)
+            let c = monthOccurrence(thisMonth, t)
+            return c > date ? c : monthOccurrence(shiftMonth(thisMonth, by: 1), t)
+        case "weekly":
+            let diff = (t.weekday - (cal.component(.weekday, from: date) - 1) + 7) % 7
+            let day = cal.date(byAdding: .day, value: diff, to: today) ?? today
+            let c = at(day, t)
+            return c > date ? c : at(cal.date(byAdding: .day, value: 7, to: day) ?? day, t)
+        default:
+            let c = at(today, t)
+            return c > date ? c : at(cal.date(byAdding: .day, value: 1, to: today) ?? today, t)
+        }
+    }
+
+    /// Id of the run slot that should be handled now, or nil if nothing is due.
     private func dueSchedulePeriod(now: Date = Date()) -> Int? {
-        guard let period = schedulePeriodIndex(for: now) else { return nil }
+        guard let t = scheduleTiming else { return nil }
+        let from = Date(timeIntervalSince1970: defaults.double(forKey: scheduleFromKey))
+        let to = Date(timeIntervalSince1970: defaults.double(forKey: scheduleToKey))
+        guard now >= from, now <= to else { return nil }
+        let latest = scheduleOccurrence(onOrBefore: now, t)
+        guard latest >= from else { return nil }
+        let id = Int(floor(latest.timeIntervalSince1970 / 60))
         if defaults.object(forKey: scheduleLastPeriodKey) != nil,
-           defaults.integer(forKey: scheduleLastPeriodKey) == period {
+           defaults.integer(forKey: scheduleLastPeriodKey) == id {
             return nil
         }
-        return period
+        return id
+    }
+
+    /// When the next scheduled run should happen (now if one is due), or nil if the schedule is over.
+    private func nextScheduleRunDate(now: Date = Date()) -> Date? {
+        guard let t = scheduleTiming else { return nil }
+        let from = Date(timeIntervalSince1970: defaults.double(forKey: scheduleFromKey))
+        let to = Date(timeIntervalSince1970: defaults.double(forKey: scheduleToKey))
+        guard now <= to else { return nil }
+        if dueSchedulePeriod(now: now) != nil { return now }
+        let next = scheduleOccurrence(after: max(now, from.addingTimeInterval(-1)), t)
+        return next <= to ? next : nil
     }
     
     func handleRelaunch(launchOptions: [UIApplication.LaunchOptionsKey: Any]?) {
@@ -225,10 +327,13 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
         let elapsed = Date().timeIntervalSince(lastTestTime)
         if elapsed >= intervalSeconds {
             runTest(location: loc)
+        } else if dueSchedulePeriod() != nil {
+            // Monitoring keeps the app awake: run the scheduled test right at its time
+            runTest(location: loc, testType: "scheduled")
         }
     }
-    
-    func runTest(location: CLLocation?) {
+
+    func runTest(location: CLLocation?, testType: String? = nil) {
         guard !isTesting, !isJsTestActive else { return }
         isTesting = true
         lastTestTime = Date()
@@ -240,7 +345,7 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
         }
         
         Task {
-            await performSpeedTestAndUpload(location: location)
+            await performSpeedTestAndUpload(location: location, testType: testType)
             if bgTask != .invalid {
                 UIApplication.shared.endBackgroundTask(bgTask)
                 bgTask = .invalid
@@ -498,10 +603,12 @@ final class NativeMonitorBridge: NSObject, RCTBridgeModule {
         }
     }
 
-    @objc(setSchedule:fromTs:toTs:serverUrl:deviceId:resolver:rejecter:)
-    func setSchedule(frequency: String, fromTs: Double, toTs: Double, serverUrl: String, deviceId: String, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+    @objc(setSchedule:fromTs:toTs:hour:minute:weekday:monthDay:serverUrl:deviceId:resolver:rejecter:)
+    func setSchedule(frequency: String, fromTs: Double, toTs: Double, hour: Double, minute: Double, weekday: Double, monthDay: Double, serverUrl: String, deviceId: String, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
         DispatchQueue.main.async {
-            NativeMonitorService.shared.setSchedule(frequency: frequency, fromTs: fromTs, toTs: toTs, serverUrl: serverUrl, deviceId: deviceId)
+            NativeMonitorService.shared.setSchedule(frequency: frequency, fromTs: fromTs, toTs: toTs,
+                                                    hour: Int(hour), minute: Int(minute), weekday: Int(weekday), monthDay: Int(monthDay),
+                                                    serverUrl: serverUrl, deviceId: deviceId)
             resolve(true)
         }
     }
