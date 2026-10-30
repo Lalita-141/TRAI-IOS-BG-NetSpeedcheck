@@ -11,9 +11,18 @@ const dbConfig = {
   connectionLimit: 25,
   queueLimit: 0,
 };
-
+const Prod_dbConfig = {
+  host: process.env.Prod_DB_Host || 'localhost',
+  port: parseInt(process.env.Prod_DB_PORT || '3306', 10),
+  user: process.env.Prod_DB_USERNAME || 'root',
+  password: process.env.PROD_DB_PASSWORD || '',
+  database: process.env.Prod_DB_NAME || 'netspeed_db',
+  waitForConnections: true,
+  connectionLimit: 25,
+  queueLimit: 0,
+};
 // Create main connection pool
-const pool = mysql.createPool(dbConfig);
+const pool = mysql.createPool(Prod_dbConfig);
 
 /**
  * Initializes MySQL database and table schema automatically on boot,
@@ -23,14 +32,14 @@ async function initDatabase() {
   try {
     // 1. Connect without DB selected to ensure the database exists
     const tempConnection = await mysql.createConnection({
-      host: dbConfig.host,
-      port: dbConfig.port,
-      user: dbConfig.user,
-      password: dbConfig.password,
+      host: Prod_dbConfig.host,
+      port: Prod_dbConfig.port,
+      user: Prod_dbConfig.user,
+      password: Prod_dbConfig.password,
     });
 
     await tempConnection.query(
-      `CREATE DATABASE IF NOT EXISTS \`${dbConfig.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`
+      `CREATE DATABASE IF NOT EXISTS \`${Prod_dbConfig.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`
     );
     await tempConnection.end();
 
@@ -65,6 +74,13 @@ async function initDatabase() {
         signal_quality VARCHAR(32) NULL,
         cell_tower VARCHAR(64) NULL,
         frequency_band VARCHAR(32) NULL,
+        measurement_source VARCHAR(40) NULL,
+        quality_category VARCHAR(16) NULL,
+        failure_reason VARCHAR(32) NULL,
+        link_quality VARCHAR(16) NULL,
+        location_ts DOUBLE NULL,
+        speed_mps DOUBLE NULL,
+        session_id VARCHAR(64) NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_samples_ts (ts),
         INDEX idx_samples_device_id (device_id),
@@ -105,11 +121,19 @@ async function initDatabase() {
       { name: 'signal_quality', type: 'VARCHAR(32) NULL' },
       { name: 'cell_tower', type: 'VARCHAR(64) NULL' },
       { name: 'frequency_band', type: 'VARCHAR(32) NULL' },
+      // Network Experience Coverage metadata (all nullable, additive)
+      { name: 'measurement_source', type: 'VARCHAR(40) NULL' },
+      { name: 'quality_category', type: 'VARCHAR(16) NULL' },
+      { name: 'failure_reason', type: 'VARCHAR(32) NULL' },
+      { name: 'link_quality', type: 'VARCHAR(16) NULL' },
+      { name: 'location_ts', type: 'DOUBLE NULL' },
+      { name: 'speed_mps', type: 'DOUBLE NULL' },
+      { name: 'session_id', type: 'VARCHAR(64) NULL' },
     ];
 
     const [existingCols] = await pool.query(
       `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'samples'`,
-      [dbConfig.database]
+      [Prod_dbConfig.database]
     );
     const existingColSet = new Set(existingCols.map(c => c.COLUMN_NAME.toLowerCase()));
 
@@ -124,10 +148,10 @@ async function initDatabase() {
       }
     }
 
-    console.log(`[MySQL] Database "${dbConfig.database}" and table "samples" verified with TRAI schema.`);
+    console.log(`[MySQL] Database "${Prod_dbConfig.database}" and table "samples" verified with TRAI schema.`);
     return true;
   } catch (err) {
-    console.error(`[MySQL Connection Error] Unable to connect to MySQL at ${dbConfig.host}:${dbConfig.port}:`, err.message);
+    console.error(`[MySQL Connection Error] Unable to connect to MySQL at ${Prod_dbConfig.host}:${Prod_dbConfig.port}:`, err.message);
     console.error(`Please verify MySQL is running and credentials in .env are correct.`);
     return false;
   }
