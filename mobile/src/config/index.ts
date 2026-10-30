@@ -3,12 +3,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppConfig } from '../types';
 import { generateUUID } from '../utils/uuid';
 
-const STORAGE_KEY_CONFIG = '@speedmonitor_config';
+// v3: drops configs persisted with older serverUrls (local-dev IP, plain-HTTP prod IP)
+const STORAGE_KEY_CONFIG = '@speedmonitor_config_v3';
 const STORAGE_KEY_DEVICE_ID = '@speedmonitor_device_id';
 
 export const DEFAULT_CONFIG: AppConfig = {
   // serverUrl: 'https://140-245-3-81.sslip.io', // Production HTTPS Backend
-  serverUrl: 'http://172.20.1.86:8000', // Local development÷ mac IP address
+  // serverUrl: 'http://172.20.1.86:8000', // Local development÷ mac IP address
+  serverUrl: 'https://netspeed.handt.ai', // Production HTTPS Backend
+  productionServerUrl: 'https://netspeed.handt.ai', // Production HTTPS Backend
   testIntervalSeconds: 10, // 10 seconds for rapid background & killed state verification
   downloadMB: 2,
   uploadMB: 1,

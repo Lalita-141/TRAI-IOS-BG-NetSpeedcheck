@@ -35,6 +35,7 @@ export interface AppConfig {
   batchSize: number;
   deviceId?: string;
   maxHistoryLimit?: number;
+  productionServerUrl?: string;
 }
 
 export type TestPhase = 'idle' | 'ping' | 'download' | 'upload' | 'saving' | 'complete' | 'error';

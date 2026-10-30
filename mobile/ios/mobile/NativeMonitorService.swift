@@ -14,7 +14,7 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
     private var isTesting = false
     private var isMonitoring = false
     private var intervalSeconds: TimeInterval = 10.0 // 10s for rapid background & killed state verification
-    private var serverUrlString: String = "https://140-245-3-81.sslip.io"
+    private var serverUrlString: String = "https://netspeed.handt.ai"
 
     // While a JS test (continuous / scheduled / manual) holds this lease, native tests are skipped
     // so two speed tests never share the radio. Expires on its own if JS gets suspended.
