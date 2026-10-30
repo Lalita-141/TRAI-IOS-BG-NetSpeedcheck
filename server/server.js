@@ -8,7 +8,7 @@ const { pool, initDatabase } = require('./db');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '8000', 10);
-const ADMIN_API_KEY = process.env.ADMIN_API_KEY || 'netspeed-admin-2026';
+const ADMIN_API_KEY = process.env.Prod_ADMIN_API_KEY || 'netspeed-admin-2026';
 const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS || '90', 10);
 const RETENTION_SECONDS = RETENTION_DAYS * 86400;
 
