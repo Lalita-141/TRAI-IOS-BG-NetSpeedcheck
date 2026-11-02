@@ -54,6 +54,18 @@ The full React Native implementation is in the [`mobile/`](file:///Users/rnt/Dow
 - A test = 3x ping latency (median), 2 MB download, 1 MB upload, plus network type (Wi-Fi/cellular) and radio (LTE/5G).
 - Samples go to a local file queue and are uploaded in batches. They are removed only after the server acks, and failed uploads retry on the next cycle.
 
+## Real values only
+Every value shown or saved is measured. If something can't be measured it stays empty (`null`, shown as `--` or "Not available"); it is never estimated or defaulted.
+- Signal strength, cell tower and frequency band come from Android (`TelephonyModule.kt`). iOS has no public API for them, so they are empty on iPhone.
+- The map only draws areas where real tests exist.
+- `server/cleanup_fake_samples.sql` removes invented rows written by older app versions. It is not run automatically.
+
+## Background testing (React Native app)
+All tests keep running with the screen off or the app in the background, through `mobile/src/services/backgroundKeepAlive.ts`:
+- iOS uses a low-power location session (grant location "Always"). Android uses one foreground service with an ongoing notification.
+- Single tests hold it for the length of the test, continuous tests for the session, and scheduled tests from when the schedule is created until its last run.
+- If the app is killed, continuous and scheduled tests resume when iOS relaunches it after a significant location change (not guaranteed), or otherwise at the next app open. Android has no relaunch, so they resume at the next app open.
+
 ## Caveats
 - If the device is stationary, iOS may stop delivering location callbacks, so tests slow down. A `BGAppRefreshTask` fallback is included, but iOS decides when it runs (roughly every 15 min or more, not guaranteed), so intervals are never strict.
   To test it in Xcode, pause the app and run in the debugger: `e -l objc -- (void)[[BGTaskScheduler sharedScheduler] _simulateLaunchForTaskWithIdentifier:@"com.example.speedmonitor.refresh"]`

@@ -17,7 +17,9 @@ import { monitorService, MonitorStatus } from './src/services/monitorService';
 import { uploader } from './src/services/uploader';
 import { sampleStore } from './src/services/sampleStore';
 import { locationService } from './src/services/locationService';
+import { requestLocationOnLaunch } from './src/services/locationPermission';
 import { scheduledTestService } from './src/services/scheduledTestService';
+import { continuousTestService } from './src/services/continuousTestService';
 
 import { SpeedDashboardView } from './src/components/SpeedDashboardView';
 import { CoverageMapView } from './src/components/CoverageMapView';
@@ -94,18 +96,24 @@ function AppContent() {
   useEffect(() => {
     loadData();
 
-    // Acquire current GPS location for Map centering
-    locationService.getCurrentLocation().then(loc => {
-      if (loc.lat && loc.lng) {
-        setCurrentLoc({ lat: loc.lat, lng: loc.lng });
-      }
-    });
+    // Ask for location ("while using", then "always"), then get GPS location for Map centering
+    requestLocationOnLaunch()
+      .catch(() => {})
+      .then(() => locationService.getCurrentLocation())
+      .then(loc => {
+        if (loc.lat && loc.lng) {
+          setCurrentLoc({ lat: loc.lat, lng: loc.lng });
+        }
+      });
 
     // Check remote configuration from server
     uploader.fetchRemoteConfig().catch(() => {});
 
     // Restore saved schedule and start checking for due scheduled tests
     scheduledTestService.init().catch(() => {});
+
+    // Resume a continuous session that was interrupted by the app being killed
+    continuousTestService.restore().catch(() => {});
 
     // Subscribe to monitor service updates
     const unsubscribe = monitorService.subscribe(newStatus => {

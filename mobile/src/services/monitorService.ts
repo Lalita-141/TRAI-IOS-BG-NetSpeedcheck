@@ -7,6 +7,12 @@ import { speedTester } from './speedTester';
 import { uploader } from './uploader';
 import { locationService } from './locationService';
 import { testCoordinator, TestOwner } from './testCoordinator';
+import { backgroundKeepAlive } from './backgroundKeepAlive';
+import { promptForBackgroundLocation } from './locationPermission';
+
+const MONITOR_KEEP_ALIVE_TAG = 'monitor';
+// Held for one test, so a manual test keeps running if the screen turns off
+const TEST_KEEP_ALIVE_TAG = 'speed-test';
 
 export interface MonitorStatus {
   isRunning: boolean;
@@ -19,19 +25,6 @@ export interface MonitorStatus {
 }
 
 export type StatusListener = (status: MonitorStatus) => void;
-
-// Safely resolve BackgroundService if native module is available
-let BackgroundService: any = null;
-try {
-  if (NativeModules && NativeModules.RNBackgroundActions) {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    BackgroundService = require('react-native-background-actions').default;
-  }
-} catch (err) {
-  console.log('Background actions not loaded, using Location keep-alive', err);
-}
-
-const sleep = (ms: number) => new Promise(resolve => setTimeout(() => resolve(undefined), ms));
 
 class MonitorService {
   private isRunning = false;
@@ -92,6 +85,7 @@ class MonitorService {
 
     // 1. Request location authorization
     locationService.requestPermission().catch(() => {});
+    promptForBackgroundLocation().catch(() => {});
 
     // 2. Start background location watch (keeps iOS and Android app alive in background)
     this.watchId = locationService.watchPosition(loc => {
@@ -126,43 +120,8 @@ class MonitorService {
       }
     }
 
-    // 5. If BackgroundService is linked & supported, start persistent background runner
-    if (BackgroundService && typeof BackgroundService.isRunning === 'function') {
-      try {
-        const backgroundRunner = async (taskData?: { delay: number }) => {
-          const delayMs = taskData?.delay || 10000;
-          while (BackgroundService.isRunning() && this.isRunning) {
-            try {
-              await this.checkAndRunIntervalTest();
-            } catch (e) {
-              console.warn('Background runner test error:', e);
-            }
-            await sleep(delayMs);
-          }
-        };
-
-        const bgOptions = {
-          taskName: 'NetSpeedMonitor',
-          taskTitle: 'NetSpeed Monitor Active',
-          taskDesc: `Logging QoS & coverage every ${intervalSeconds}s in background`,
-          taskIcon: {
-            name: 'ic_launcher',
-            type: 'mipmap',
-          },
-          color: '#06B6D4',
-          linkingURI: 'speedmonitor://',
-          parameters: {
-            delay: intervalSeconds * 1000,
-          },
-        };
-
-        if (!BackgroundService.isRunning()) {
-          await BackgroundService.start(backgroundRunner, bgOptions);
-        }
-      } catch (bgErr) {
-        console.warn('BackgroundService.start error:', bgErr);
-      }
-    }
+    // 5. Keep JS running with the screen off, so the interval loop above keeps firing
+    backgroundKeepAlive.acquire(MONITOR_KEEP_ALIVE_TAG);
 
     return true;
   }
@@ -188,15 +147,7 @@ class MonitorService {
       }
     }
 
-    if (BackgroundService && typeof BackgroundService.isRunning === 'function') {
-      try {
-        if (BackgroundService.isRunning()) {
-          await BackgroundService.stop();
-        }
-      } catch (e) {
-        console.warn('BackgroundService.stop error:', e);
-      }
-    }
+    backgroundKeepAlive.release(MONITOR_KEEP_ALIVE_TAG);
 
     this.notify();
   }
@@ -232,6 +183,7 @@ class MonitorService {
     }
 
     this.isTesting = true;
+    backgroundKeepAlive.acquire(TEST_KEEP_ALIVE_TAG);
     this.notify({
       phase: 'idle',
       message: testCoordinator.isBusy()
@@ -272,9 +224,10 @@ class MonitorService {
         network: result.networkType,
         radio: result.radioTech,
         carrier: result.carrier,
+        ...result.signal,
         device_model: Platform.OS === 'ios' ? 'Apple iPhone' : 'Android Device',
         os_platform: `${Platform.OS} ${Platform.Version}`,
-        location_type: loc.accuracy && loc.accuracy < 25 ? 'Outdoor' : 'Indoor',
+        location_type: config.testLabel ?? null,
         lat: loc.lat,
         lng: loc.lng,
         accuracy: loc.accuracy,
@@ -315,6 +268,8 @@ class MonitorService {
         err?.message || 'Speed test encountered an error'
       );
       return null;
+    } finally {
+      backgroundKeepAlive.release(TEST_KEEP_ALIVE_TAG);
     }
   }
 

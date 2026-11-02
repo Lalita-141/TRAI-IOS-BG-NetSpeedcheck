@@ -13,11 +13,14 @@ import { uploader } from './uploader';
 import { speedTester } from './speedTester';
 import { locationService } from './locationService';
 import { testCoordinator, TestOwner } from './testCoordinator';
+import { backgroundKeepAlive } from './backgroundKeepAlive';
+import { promptForBackgroundLocation } from './locationPermission';
 
 const STORAGE_KEY_SCHEDULE = '@speedmonitor_scheduled_test';
+const KEEP_ALIVE_TAG = 'scheduled';
 
-// How often the JS side checks for a due run while the app process is alive
-// (foreground, or kept alive in background by monitoring / continuous test).
+// How often the JS side checks for a due run. The schedule's own keep-alive keeps
+// this running with the screen off until the schedule is over.
 const CHECK_INTERVAL_MS = 60 * 1000;
 
 // A full speed test finished by another feature this recently satisfies the
@@ -225,6 +228,7 @@ class ScheduledTestService {
 
   async setSchedule(config: ScheduledTestConfig): Promise<void> {
     await this.init();
+    promptForBackgroundLocation().catch(() => {});
     const full = withTimestamps(config);
     const now = Date.now();
 
@@ -267,14 +271,25 @@ class ScheduledTestService {
     await this.init();
     this.setState({ ...EMPTY_STATE });
     await this.persist();
+    this.updateKeepAlive();
     const bridge = nativeBridge();
     if (bridge && typeof bridge.clearSchedule === 'function') {
       bridge.clearSchedule().catch(() => {});
     }
   }
 
+  // Held from the moment a schedule exists until its last run is done
+  private updateKeepAlive() {
+    if (getNextRunAt(this.state) != null) {
+      backgroundKeepAlive.acquire(KEEP_ALIVE_TAG, { relaunchAfterKill: true });
+    } else {
+      backgroundKeepAlive.release(KEEP_ALIVE_TAG);
+    }
+  }
+
   /** Runs the scheduled test if its run time has arrived and it hasn't run yet. */
   async checkAndRun(): Promise<void> {
+    this.updateKeepAlive();
     const config = this.state.config;
     if (this.checking || !config) return;
     if (dueOccurrence(this.state) == null) return;
@@ -318,9 +333,10 @@ class ScheduledTestService {
           network: result.networkType,
           radio: result.radioTech,
           carrier: result.carrier,
+          ...result.signal,
           device_model: Platform.OS === 'ios' ? 'Apple iPhone' : 'Android Device',
           os_platform: `${Platform.OS} ${Platform.Version}`,
-          location_type: loc.accuracy && loc.accuracy < 25 ? 'Outdoor' : 'Indoor',
+          location_type: appConfig.testLabel ?? null,
           lat: loc.lat,
           lng: loc.lng,
           accuracy: loc.accuracy,

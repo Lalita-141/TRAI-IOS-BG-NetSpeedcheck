@@ -23,7 +23,6 @@ import {
   LanguageIcon,
   DataUsageIcon,
   FaqIcon,
-  TutorialVideoIcon,
   InfoCircleIcon,
   ShareAppIcon,
   StarFeedbackIcon,
@@ -46,7 +45,6 @@ type ActiveModal =
   | 'language'
   | 'data_usage'
   | 'faq'
-  | 'tutorial'
   | 'about'
   | 'feedback'
   | 'label'
@@ -72,38 +70,15 @@ const FAQ_ITEMS = [
   },
   {
     q: 'How is Video Streaming performance tested?',
-    a: 'Our video test measures Time to First Byte (TTFB), player startup delay, and buffer stability across simulated media chunk streams.',
+    a: 'Our video test measures Time to First Byte (TTFB), player startup delay, and download speed of a test video stream from the server. It also times a test web page.',
   },
   {
     q: 'Does background monitoring exhaust mobile data?',
-    a: 'Background probes are lightweight (1-2 MB). You can also enable "Wi-Fi Only Mode" under About Data Usage to completely prevent cellular quota consumption.',
+    a: 'Each speed test transfers about 3 MB by default, so short test intervals use a lot of data. You can also enable "Wi-Fi Only Mode" under About Data Usage to completely prevent cellular quota consumption.',
   },
   {
     q: 'How long are test samples stored on the server?',
     a: 'Measurement telemetry uploaded to the backend is automatically purged after 90 days in accordance with automated data retention policies.',
-  },
-];
-
-const TUTORIAL_VIDEOS = [
-  {
-    title: '1. Getting Started with NetSpeed Monitor',
-    duration: '2:15 min',
-    desc: 'Learn how to run 5G/4G QoS speed tests, monitor background telemetry, and understand latency.',
-  },
-  {
-    title: '2. Understanding Video & Browser QoS Testing',
-    duration: '3:40 min',
-    desc: 'Deep-dive into video TTFB, buffer stall ratio, and simulated browsing experience scores.',
-  },
-  {
-    title: '3. Exploring Network Coverage Heatmaps',
-    duration: '4:10 min',
-    desc: 'Navigate hexagonal cell coverage maps, switch between carriers, and inspect local verified grids.',
-  },
-  {
-    title: '4. Exporting & Managing QoS Records',
-    duration: '1:50 min',
-    desc: 'Learn how to export measurement logs to CSV/JSON spreadsheets and manage backend retention.',
   },
 ];
 
@@ -122,7 +97,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
 
   // New Settings Sub-Modals
   const [activeModal, setActiveModal] = useState<ActiveModal>(null);
-  const [selectedLabel, setSelectedLabel] = useState('Outdoor');
+  const [selectedLabel, setSelectedLabel] = useState<string | null>(null);
   const [feedbackRating, setFeedbackRating] = useState(5);
   const [feedbackCategory, setFeedbackCategory] = useState('General');
   const [feedbackComments, setFeedbackComments] = useState('');
@@ -144,6 +119,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
     setDownloadMB(config.downloadMB);
     setUploadMB(config.uploadMB);
     setWifiOnly(config.wifiOnly);
+    setSelectedLabel(config.testLabel ?? null);
     setMaxHistoryLimit(config.maxHistoryLimit || 500);
     setDeviceId(id);
     setSampleCount(capacity.count);
@@ -480,22 +456,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
           <ChevronRightIcon size={18} color="#94A3B8" />
         </TouchableOpacity>
 
-        {/* 4. Watch Tutorial Videos */}
-        <TouchableOpacity
-          style={styles.settingCardRow}
-          onPress={() => setActiveModal('tutorial')}
-          activeOpacity={0.75}>
-          <View style={[styles.iconBox, styles.iconBoxAmber]}>
-            <TutorialVideoIcon size={20} color="#D97706" />
-          </View>
-          <View style={styles.settingCardContent}>
-            <Text style={styles.settingCardTitle}>{t('watch_tutorials', 'Watch Tutorial Videos')}</Text>
-            <Text style={styles.settingCardSubtitle}>
-              {t('watch_tutorials_sub', 'Guides for speed, video & coverage')}
-            </Text>
-          </View>
-          <ChevronRightIcon size={18} color="#94A3B8" />
-        </TouchableOpacity>
       </View>
 
       {/* SECTION 3: ABOUT & FEEDBACK */}
@@ -628,7 +588,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
           </View>
           <View style={styles.settingCardContent}>
             <Text style={styles.settingCardTitle}>{t('add_test_label', 'Add Test Label')}</Text>
-            <Text style={styles.settingCardSubtitle}>Current: {selectedLabel}</Text>
+            <Text style={styles.settingCardSubtitle}>Current: {selectedLabel ?? 'None'}</Text>
           </View>
           <ChevronRightIcon size={18} color="#94A3B8" />
         </TouchableOpacity>
@@ -867,38 +827,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
         </View>
       </Modal>
 
-      {/* 4. TUTORIAL VIDEOS MODAL */}
-      <Modal
-        visible={activeModal === 'tutorial'}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setActiveModal(null)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCardLarge}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Tutorial Videos & Guides</Text>
-              <TouchableOpacity onPress={() => setActiveModal(null)} style={styles.modalCloseBtn}>
-                <CloseIcon size={18} color="#64748B" />
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
-              {TUTORIAL_VIDEOS.map((vid, idx) => (
-                <View key={idx} style={styles.tutorialCard}>
-                  <View style={styles.tutorialThumb}>
-                    <Text style={styles.tutorialPlayIcon}>▶</Text>
-                    <Text style={styles.tutorialDurationBadge}>{vid.duration}</Text>
-                  </View>
-                  <View style={styles.tutorialContent}>
-                    <Text style={styles.tutorialTitle}>{vid.title}</Text>
-                    <Text style={styles.tutorialDesc}>{vid.desc}</Text>
-                  </View>
-                </View>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
       {/* 5. ABOUT US MODAL */}
       <Modal
         visible={activeModal === 'about'}
@@ -1025,7 +953,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
                     key={lbl.id}
                     style={[styles.modalOptionRow, isSelected && styles.modalOptionRowSelected]}
                     onPress={() => {
-                      setSelectedLabel(lbl.id);
+                      // Tapping the current label clears it
+                      const next = isSelected ? null : lbl.id;
+                      setSelectedLabel(next);
+                      saveConfig({ testLabel: next });
                       setActiveModal(null);
                     }}
                     activeOpacity={0.7}>

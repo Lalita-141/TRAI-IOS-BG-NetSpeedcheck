@@ -23,6 +23,11 @@ export interface Sample {
   page_load_sec?: number | null;
   ttfb_ms?: number | null;
   streaming_quality?: string | null;
+  // Radio values, only present when the phone reports them (Android; iOS has no public API)
+  signal_dbm?: number | null;
+  signal_quality?: string | null;
+  cell_tower?: string | null;
+  frequency_band?: string | null;
   is_pending?: boolean; // UI only: still waiting in the local queue for upload
 }
 
@@ -36,6 +41,7 @@ export interface AppConfig {
   deviceId?: string;
   maxHistoryLimit?: number;
   productionServerUrl?: string;
+  testLabel?: string | null; // environment chosen by the user (Outdoor, Home, ...)
 }
 
 export type TestPhase = 'idle' | 'ping' | 'download' | 'upload' | 'saving' | 'complete' | 'error';

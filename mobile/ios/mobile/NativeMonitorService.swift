@@ -15,6 +15,7 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
     private var isMonitoring = false
     private var intervalSeconds: TimeInterval = 10.0 // 10s for rapid background & killed state verification
     private var serverUrlString: String = "https://netspeed.handt.ai"
+    private let pathMonitor = NWPathMonitor()
 
     // While a JS test (continuous / scheduled / manual) holds this lease, native tests are skipped
     // so two speed tests never share the radio. Expires on its own if JS gets suspended.
@@ -49,6 +50,7 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
     
     private override init() {
         super.init()
+        pathMonitor.start(queue: DispatchQueue(label: "NativeMonitorService.path"))
         lm.delegate = self
         lm.desiredAccuracy = kCLLocationAccuracyBest
         lm.distanceFilter = kCLDistanceFilterNone // Continuous updates even stationary
@@ -136,8 +138,7 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
         Task {
             await self.performSpeedTestAndUpload(
                 location: self.lm.location,
-                testType: duePeriod != nil ? "scheduled" : nil,
-                useFallbackLocation: duePeriod == nil
+                testType: duePeriod != nil ? "scheduled" : nil
             )
             // Re-aim the next wake-up now that this run is recorded
             self.scheduleAppRefresh()
@@ -317,8 +318,17 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
         // If iOS relaunched the app due to location events from killed state:
         if launchOptions?[.location] != nil {
             NSLog("[NativeMonitorService] App relaunched from KILLED state by iOS Location Event!")
-            startMonitoring()
-            runTest(location: lm.location)
+            // Continuous / scheduled tests can relaunch the app too: only resume monitoring if it was on.
+            // Those features are resumed by JS, which also starts on a background relaunch.
+            if defaults.bool(forKey: monitoringEnabledKey) {
+                startMonitoring()
+                runTest(location: lm.location)
+            } else if dueSchedulePeriod() != nil {
+                if let scheduleUrl = defaults.string(forKey: scheduleServerUrlKey) {
+                    serverUrlString = scheduleUrl
+                }
+                runTest(location: lm.location, testType: "scheduled")
+            }
         }
     }
     
@@ -354,39 +364,81 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
         }
     }
     
-    private func performSpeedTestAndUpload(location: CLLocation?, testType: String? = nil, useFallbackLocation: Bool = true) async {
+    /// Operator / ISP from the connection's public IP. Same source and names as the JS tester.
+    private func resolvePublicISP(session: URLSession) async -> String? {
+        guard let url = URL(string: "https://ipwho.is/?fields=connection,success") else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 3
+        guard let (data, _) = try? await session.data(for: request),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              json["success"] as? Bool == true,
+              let connection = json["connection"] as? [String: Any],
+              let raw = (connection["isp"] as? String) ?? (connection["org"] as? String),
+              !raw.isEmpty else { return nil }
+        let lower = raw.lowercased()
+        if lower.contains("jio") { return "Jio" }
+        if lower.contains("airtel") { return "Airtel" }
+        if lower.contains("bsnl") || lower.contains("bharat sanchar") { return "BSNL" }
+        if lower.contains("vodafone") || lower.contains("idea") || lower.contains("vi ") { return "Vi" }
+        if lower.contains("atria") || lower.contains("act fibernet") { return "ACT Fibernet" }
+        if lower.contains("tata") { return "Tata Play Fiber" }
+        if lower.contains("hathway") { return "Hathway" }
+        if lower.contains("excitel") { return "Excitel" }
+        return String(raw.prefix(20))
+    }
+
+    /// Every measured value stays nil (null on the server) when it could not be measured.
+    private func performSpeedTestAndUpload(location: CLLocation?, testType: String? = nil) async {
         guard let serverUrl = URL(string: serverUrlString) else { return }
-        
-        // 1. Telecom & Radio context
-        var carrierName = "Cellular"
-        var radioTech = "5G"
-        let telephony = CTTelephonyNetworkInfo()
-        if #available(iOS 12.0, *), let providers = telephony.serviceSubscriberCellularProviders {
-            for (_, carrier) in providers {
-                if let name = carrier.carrierName, !name.isEmpty {
-                    carrierName = name
-                    break
+        let session = URLSession(configuration: .ephemeral)
+
+        // 1. Network, telecom & radio context
+        let path = pathMonitor.currentPath
+        let network: String
+        if path.status != .satisfied {
+            network = "none"
+        } else if path.usesInterfaceType(.wifi) {
+            network = "wifi"
+        } else if path.usesInterfaceType(.cellular) {
+            network = "cellular"
+        } else if path.usesInterfaceType(.wiredEthernet) {
+            network = "ethernet"
+        } else {
+            network = "other"
+        }
+
+        var carrierName: String?
+        var radioTech: String?
+        if network == "wifi" {
+            radioTech = "Wi-Fi"
+        } else if network == "cellular" {
+            let telephony = CTTelephonyNetworkInfo()
+            if #available(iOS 12.0, *) {
+                if let providers = telephony.serviceSubscriberCellularProviders {
+                    carrierName = providers.values.compactMap { $0.carrierName }.first { !$0.isEmpty && $0 != "--" }
                 }
-            }
-            if let techs = telephony.serviceCurrentRadioAccessTechnology, let raw = techs.values.first {
-                if raw == CTRadioAccessTechnologyNR || raw == CTRadioAccessTechnologyNRNSA {
-                    radioTech = "5G"
-                } else if raw == CTRadioAccessTechnologyLTE {
-                    radioTech = "4G / LTE"
-                } else {
-                    radioTech = raw.replacingOccurrences(of: "CTRadioAccessTechnology", with: "")
+                if let raw = telephony.serviceCurrentRadioAccessTechnology?.values.first {
+                    if raw == CTRadioAccessTechnologyNR || raw == CTRadioAccessTechnologyNRNSA {
+                        radioTech = "5G"
+                    } else if raw == CTRadioAccessTechnologyLTE {
+                        radioTech = "4G / LTE"
+                    } else {
+                        radioTech = raw.replacingOccurrences(of: "CTRadioAccessTechnology", with: "")
+                    }
                 }
             }
         }
-        
+        if carrierName == nil && network != "none" {
+            carrierName = await resolvePublicISP(session: session)
+        }
+
         // 2. Measure Latency (5 pings)
         var pings: [Double] = []
-        let session = URLSession(configuration: .ephemeral)
         for i in 0..<5 {
             let pingUrl = serverUrl.appendingPathComponent("ping")
             var comps = URLComponents(url: pingUrl, resolvingAgainstBaseURL: false)
             comps?.queryItems = [URLQueryItem(name: "_t", value: "\(Date().timeIntervalSince1970)_\(i)")]
-            
+
             if let target = comps?.url {
                 let s = Date()
                 if let (_, resp) = try? await session.data(from: target),
@@ -395,9 +447,9 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
                 }
             }
         }
-        
-        let latency = pings.isEmpty ? 50.0 : pings.sorted()[pings.count / 2]
-        var jitter = 0.0
+
+        let latency: Double? = pings.isEmpty ? nil : pings.sorted()[pings.count / 2]
+        var jitter: Double?
         if pings.count > 1 {
             var diff = 0.0
             for i in 1..<pings.count {
@@ -406,22 +458,23 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
             jitter = diff / Double(pings.count - 1)
         }
         let packetLoss = Double((5 - pings.count) * 20)
-        
+
         // 3. Measure Download (2 MB)
-        var downMbps = 0.0
+        var downMbps: Double?
         let downUrl = serverUrl.appendingPathComponent("download")
         var downComps = URLComponents(url: downUrl, resolvingAgainstBaseURL: false)
         downComps?.queryItems = [URLQueryItem(name: "mb", value: "2"), URLQueryItem(name: "_t", value: "\(Date().timeIntervalSince1970)")]
         if let downTarget = downComps?.url {
             let start = Date()
-            if let (data, _) = try? await session.data(from: downTarget) {
+            if let (data, resp) = try? await session.data(from: downTarget),
+               (resp as? HTTPURLResponse)?.statusCode == 200, !data.isEmpty {
                 let duration = max(Date().timeIntervalSince(start), 0.001)
                 downMbps = Double(data.count * 8) / 1_000_000 / duration
             }
         }
-        
+
         // 4. Measure Upload (1 MB)
-        var upMbps = 0.0
+        var upMbps: Double?
         let upUrl = serverUrl.appendingPathComponent("upload")
         var upReq = URLRequest(url: upUrl)
         upReq.httpMethod = "POST"
@@ -433,41 +486,36 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
             let duration = max(Date().timeIntervalSince(upStart), 0.001)
             upMbps = Double(dummyData.count * 8) / 1_000_000 / duration
         }
-        
+
         // 5. Build Sample & Upload to server
+        func rounded(_ value: Double?, _ places: Double) -> Any {
+            guard let value = value else { return NSNull() }
+            let factor = pow(10.0, places)
+            return (value * factor).rounded() / factor
+        }
+
         let sampleId = UUID().uuidString
         let deviceId = configuredDeviceId
-        let lat = location?.coordinate.latitude ?? 18.5501
-        let lng = location?.coordinate.longitude ?? 73.9410
-        let accuracy = location?.horizontalAccuracy ?? 5.0
-        let env = accuracy < 25.0 ? "Outdoor" : "Indoor"
-        
         var samplePayload: [String: Any] = [
             "id": sampleId,
             "device_id": deviceId,
             "ts": Date().timeIntervalSince1970,
-            "down_mbps": Double(String(format: "%.2f", downMbps)) ?? downMbps,
-            "up_mbps": Double(String(format: "%.2f", upMbps)) ?? upMbps,
-            "latency_ms": round(latency),
-            "jitter_ms": Double(String(format: "%.1f", jitter)) ?? jitter,
+            "down_mbps": rounded(downMbps, 2),
+            "up_mbps": rounded(upMbps, 2),
+            "latency_ms": rounded(latency, 0),
+            "jitter_ms": rounded(jitter, 1),
             "packet_loss_pct": packetLoss,
-            "network": "cellular",
-            "radio": radioTech,
-            "carrier": carrierName,
+            "network": network,
+            "radio": radioTech ?? NSNull(),
+            "carrier": carrierName ?? NSNull(),
             "device_model": "Apple iPhone (Native iOS Background)",
             "os_platform": "iOS \(UIDevice.current.systemVersion)",
-            "location_type": env,
-            "lat": lat,
-            "lng": lng,
-            "accuracy": accuracy
+            "lat": location?.coordinate.latitude ?? NSNull(),
+            "lng": location?.coordinate.longitude ?? NSNull(),
+            "accuracy": location?.horizontalAccuracy ?? NSNull()
         ]
         if let testType = testType {
             samplePayload["test_type"] = testType
-        }
-        if location == nil && !useFallbackLocation {
-            samplePayload["lat"] = NSNull()
-            samplePayload["lng"] = NSNull()
-            samplePayload["accuracy"] = NSNull()
         }
 
         // Send POST to /v1/speed-samples
@@ -478,10 +526,11 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
         if let body = try? JSONSerialization.data(withJSONObject: ["samples": [samplePayload]]) {
             ingestReq.httpBody = body
             let response = try? await session.data(for: ingestReq)
-            NSLog("[NativeMonitorService] Successfully uploaded background/killed sample \(sampleId) -> \(downMbps) Mbps (Device: \(deviceId))")
+            let uploaded = (response?.1 as? HTTPURLResponse)?.statusCode == 200
+            NSLog("[NativeMonitorService] Background sample \(sampleId) uploaded=\(uploaded) (Device: \(deviceId))")
 
             // Any native test uploaded during a due schedule period also satisfies that period
-            if (response?.1 as? HTTPURLResponse)?.statusCode == 200, let period = dueSchedulePeriod() {
+            if uploaded, let period = dueSchedulePeriod() {
                 markScheduledRun(period: period, at: Date().timeIntervalSince1970)
             }
         }
@@ -489,19 +538,21 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
 }
 
 /// Low-power location session that keeps the JS runtime alive in the background
-/// (screen off / app backgrounded) while a continuous test session runs.
+/// (screen off / app backgrounded) while any test or schedule needs it.
 /// Separate from NativeMonitorService's manager, so it never triggers native monitor tests.
 final class NativeKeepAlive: NSObject, CLLocationManagerDelegate {
     static let shared = NativeKeepAlive()
 
     private let lm = CLLocationManager()
     private var holders = Set<String>()
+    private var relaunchHolders = Set<String>()
+    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
 
     private override init() {
         super.init()
         lm.delegate = self
         lm.desiredAccuracy = kCLLocationAccuracyHundredMeters
-        lm.distanceFilter = 50
+        lm.distanceFilter = kCLDistanceFilterNone // Keep updates coming while stationary, like the monitor
         lm.pausesLocationUpdatesAutomatically = false
         lm.allowsBackgroundLocationUpdates = true
         if #available(iOS 11.0, *) {
@@ -509,24 +560,121 @@ final class NativeKeepAlive: NSObject, CLLocationManagerDelegate {
         }
     }
 
-    func acquire(_ tag: String) {
+    func acquire(_ tag: String, relaunchAfterKill: Bool) {
         holders.insert(tag)
         if holders.count == 1 {
             lm.requestAlwaysAuthorization()
             lm.startUpdatingLocation()
+            beginBackgroundTask()
+        }
+        if relaunchAfterKill {
+            relaunchHolders.insert(tag)
+            lm.startMonitoringSignificantLocationChanges() // Relaunches app from killed state
         }
     }
 
     func release(_ tag: String) {
         holders.remove(tag)
+        relaunchHolders.remove(tag)
         if holders.isEmpty {
             lm.stopUpdatingLocation()
+            endBackgroundTask()
         }
+        if relaunchHolders.isEmpty {
+            lm.stopMonitoringSignificantLocationChanges()
+        }
+    }
+
+    // Short grace period so a single test can still finish if location permission was denied
+    private func beginBackgroundTask() {
+        guard backgroundTask == .invalid else { return }
+        backgroundTask = UIApplication.shared.beginBackgroundTask { [weak self] in
+            self?.endBackgroundTask()
+        }
+    }
+
+    private func endBackgroundTask() {
+        guard backgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTask)
+        backgroundTask = .invalid
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {}
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {}
+}
+
+/// Location permission prompts. iOS only offers "Always" as a second prompt, after
+/// "While Using" was granted, and shows that second prompt once.
+final class NativeLocationPermission: NSObject, CLLocationManagerDelegate {
+    static let shared = NativeLocationPermission()
+
+    private let lm = CLLocationManager()
+    private var completion: ((String) -> Void)?
+    private var promptVisible = false
+    private var statusBeforeRequest = ""
+
+    private override init() {
+        super.init()
+        lm.delegate = self
+        NotificationCenter.default.addObserver(self, selector: #selector(appWillResignActive),
+                                               name: UIApplication.willResignActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(appDidBecomeActive),
+                                               name: UIApplication.didBecomeActiveNotification, object: nil)
+    }
+
+    func status() -> String {
+        let current: CLAuthorizationStatus
+        if #available(iOS 14.0, *) {
+            current = lm.authorizationStatus
+        } else {
+            current = CLLocationManager.authorizationStatus()
+        }
+        switch current {
+        case .authorizedAlways: return "always"
+        case .authorizedWhenInUse: return "whenInUse"
+        case .notDetermined: return "notDetermined"
+        default: return "denied"
+        }
+    }
+
+    func request(always: Bool, completion: @escaping (String) -> Void) {
+        finish() // Never leave an earlier request's promise waiting
+        self.completion = completion
+        promptVisible = false
+        statusBeforeRequest = status()
+
+        if always {
+            lm.requestAlwaysAuthorization()
+        } else {
+            lm.requestWhenInUseAuthorization()
+        }
+
+        // iOS shows nothing if the one-time prompt was already used
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self = self, !self.promptVisible else { return }
+            self.finish()
+        }
+    }
+
+    private func finish() {
+        let done = completion
+        completion = nil
+        done?(status())
+    }
+
+    @objc private func appWillResignActive() {
+        if completion != nil { promptVisible = true }
+    }
+
+    // The prompt was closed. Choosing "Keep Only While Using" changes no status, so this is the only signal.
+    @objc private func appDidBecomeActive() {
+        if promptVisible { finish() }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        if completion != nil && status() != statusBeforeRequest { finish() }
+    }
 }
 
 @objc(NativeMonitorBridge)
@@ -579,6 +727,20 @@ final class NativeMonitorBridge: NSObject, RCTBridgeModule {
         }
     }
 
+    @objc(getLocationAccess:rejecter:)
+    func getLocationAccess(resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            resolve(NativeLocationPermission.shared.status())
+        }
+    }
+
+    @objc(requestLocationAccess:resolver:rejecter:)
+    func requestLocationAccess(always: Bool, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            NativeLocationPermission.shared.request(always: always) { resolve($0) }
+        }
+    }
+
     @objc(setJsTestLease:resolver:rejecter:)
     func setJsTestLease(seconds: Double, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
         DispatchQueue.main.async {
@@ -587,10 +749,10 @@ final class NativeMonitorBridge: NSObject, RCTBridgeModule {
         }
     }
 
-    @objc(acquireKeepAlive:resolver:rejecter:)
-    func acquireKeepAlive(tag: String, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+    @objc(acquireKeepAlive:relaunchAfterKill:resolver:rejecter:)
+    func acquireKeepAlive(tag: String, relaunchAfterKill: Bool, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
         DispatchQueue.main.async {
-            NativeKeepAlive.shared.acquire(tag)
+            NativeKeepAlive.shared.acquire(tag, relaunchAfterKill: relaunchAfterKill)
             resolve(true)
         }
     }

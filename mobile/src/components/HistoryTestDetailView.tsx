@@ -10,6 +10,13 @@ import {
 import { WebView } from 'react-native-webview';
 import { Sample } from '../types';
 import { reverseGeocode } from '../services/geocodeService';
+import {
+  NOT_MEASURED,
+  displayCarrier,
+  displayRadio,
+  displaySignal,
+  useTestServerHost,
+} from '../utils/sampleDisplay';
 import { useTranslation } from '../i18n';
 import {
   BackArrowIcon,
@@ -44,9 +51,8 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
   const [mapType, setMapType] = useState<'map' | 'satellite'>('map');
   const webViewRef = useRef<any>(null);
 
-  // Fallback to center coordinates if sample has none
-  const lat = sample.lat ?? 37.7858;
-  const lng = sample.lng ?? -122.4064;
+  const lat = sample.lat;
+  const lng = sample.lng;
 
   useEffect(() => {
     let isMounted = true;
@@ -75,38 +81,18 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
     hour12: true,
   });
 
-  const downSpeed =
-    sample.down_mbps != null ? sample.down_mbps.toFixed(1) : '0.0';
-  const upSpeed =
-    sample.up_mbps != null ? sample.up_mbps.toFixed(1) : '0.0';
-  const latency =
-    sample.latency_ms != null ? Math.round(sample.latency_ms) : 0;
-  const packetLoss =
-    sample.packet_loss_pct != null ? `${sample.packet_loss_pct}%` : '0%';
-  const jitter =
-    sample.jitter_ms != null ? `${sample.jitter_ms.toFixed(2)} ms` : '0.00 ms';
+  const downSpeed = sample.down_mbps != null ? sample.down_mbps.toFixed(1) : NOT_MEASURED;
+  const upSpeed = sample.up_mbps != null ? sample.up_mbps.toFixed(1) : NOT_MEASURED;
+  const latency = sample.latency_ms != null ? Math.round(sample.latency_ms) : NOT_MEASURED;
+  const packetLoss = sample.packet_loss_pct != null ? `${sample.packet_loss_pct}%` : NOT_MEASURED;
+  const jitter = sample.jitter_ms != null ? `${sample.jitter_ms.toFixed(2)} ms` : NOT_MEASURED;
 
-  const carrier =
-    sample.carrier && sample.carrier !== '--' && sample.carrier !== 'wifi'
-      ? sample.carrier
-      : 'Airtel';
-  const radio = sample.network === 'wifi' ? 'Wi-Fi' : sample.radio || '4G';
+  const carrier = displayCarrier(sample);
+  const radio = displayRadio(sample);
+  const coverage = displaySignal(sample);
 
-  // Calculate coverage dBm
-  const coverageDbm =
-    sample.network === 'wifi'
-      ? '-58 dBm'
-      : (sample.down_mbps ?? 0) >= 50
-      ? '-72 dBm'
-      : (sample.down_mbps ?? 0) >= 20
-      ? '-88 dBm'
-      : '-101 dBm';
-
-  const shortTestId = sample.id ? sample.id.substring(0, 6) : 'c2';
-  const serverDisplay =
-    sample.network === 'wifi'
-      ? 'AIRTEL - Core Server'
-      : `${carrier.toUpperCase()} - Core Server`;
+  const shortTestId = sample.id ? sample.id.substring(0, 6) : NOT_MEASURED;
+  const serverDisplay = useTestServerHost();
 
   const handleShare = async () => {
     try {
@@ -139,7 +125,9 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
 
   // Generate Leaflet Map HTML centered on this single test sample
   const mapHtml = useMemo(() => {
-    const color = (sample.down_mbps ?? 0) >= 25 ? '#00A389' : (sample.down_mbps ?? 0) >= 10 ? '#F59E0B' : '#EF4444';
+    const down = sample.down_mbps;
+    const color = down == null ? '#94A3B8' : down >= 25 ? '#00A389' : down >= 10 ? '#F59E0B' : '#EF4444';
+    const accuracyRadius = sample.accuracy ?? 0;
     const speedText = downSpeed;
 
     return `
@@ -275,9 +263,9 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
     var marker = L.marker([${lat}, ${lng}], { icon: pinIcon }).addTo(map);
     marker.bindPopup(popupHtml, { maxWidth: 220, closeButton: false }).openPopup();
 
-    // Accuracy Circle
+    // Accuracy Circle (the real GPS accuracy of this test)
     L.circle([${lat}, ${lng}], {
-      radius: 65,
+      radius: ${accuracyRadius},
       color: '${color}',
       fillColor: '${color}',
       fillOpacity: 0.12,
@@ -305,7 +293,7 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
 </body>
 </html>
     `;
-  }, [lat, lng, sample.down_mbps, downSpeed, upSpeed, latency, carrier, radio, locationName]);
+  }, [lat, lng, sample.down_mbps, sample.accuracy, downSpeed, upSpeed, latency, carrier, radio, locationName]);
 
   return (
     <View style={styles.container}>
@@ -395,7 +383,7 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
                 <CoverageTestIcon size={15} color="#64748B" />
                 <Text style={styles.fieldHeaderLabel}>{t('filter_coverage', 'Coverage')}</Text>
               </View>
-              <Text style={styles.fieldBoldValue}>{coverageDbm}</Text>
+              <Text style={styles.fieldBoldValue}>{coverage}</Text>
             </View>
 
             <View style={styles.gridCol}>
@@ -464,13 +452,16 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
               <Text style={styles.fieldHeaderLabel}>{t('location', 'Location')}</Text>
             </View>
             <Text style={styles.locationTitleText}>{locationName}</Text>
-            <Text style={styles.locationCoordinatesText}>
-              Latitude: {lat.toFixed(4)}, Longitude: {lng.toFixed(4)}
-            </Text>
+            {lat != null && lng != null ? (
+              <Text style={styles.locationCoordinatesText}>
+                Latitude: {lat.toFixed(4)}, Longitude: {lng.toFixed(4)}
+              </Text>
+            ) : null}
           </View>
         </View>
 
-        {/* 3. TEST LOCATION MAP (End of this page as explicitly requested) */}
+        {/* 3. TEST LOCATION MAP: only when this test really has a GPS position */}
+        {lat != null && lng != null ? (
         <View style={styles.mapCard}>
           <View style={styles.mapCardHeaderRow}>
             <View style={styles.mapTitleLeft}>
@@ -532,6 +523,7 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
             </Text>
           </View>
         </View>
+        ) : null}
 
         {/* 4. BOTTOM ACTION BUTTONS */}
         <View style={styles.bottomButtonsRow}>

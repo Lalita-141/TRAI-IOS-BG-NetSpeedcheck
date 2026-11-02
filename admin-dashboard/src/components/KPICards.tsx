@@ -64,7 +64,7 @@ export const KPICards: React.FC<KPICardsProps> = ({ stats }) => {
           </div>
         </div>
         <div className="kpi-number" style={{ color: '#60A5FA' }}>
-          {stats?.top_carrier || 'Airtel'}
+          {stats?.top_carrier || '--'}
         </div>
         <div className="kpi-subtext">Highest median throughput nationwide</div>
       </div>

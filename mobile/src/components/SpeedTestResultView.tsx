@@ -10,6 +10,13 @@ import {
 import { Sample } from '../types';
 import { reverseGeocode } from '../services/geocodeService';
 import {
+  NOT_MEASURED,
+  displayCarrier,
+  displayRadio,
+  displaySignal,
+  useTestServerHost,
+} from '../utils/sampleDisplay';
+import {
   BackArrowIcon,
   CoverageTestIcon,
   SignalBarsIcon,
@@ -31,7 +38,7 @@ interface SpeedTestResultViewProps {
 
 export const SpeedTestResultView: React.FC<SpeedTestResultViewProps> = ({
   sample,
-  testId = 1,
+  testId = NOT_MEASURED,
   onBack,
   onRunVideoBrowserTest,
 }) => {
@@ -56,19 +63,16 @@ export const SpeedTestResultView: React.FC<SpeedTestResultViewProps> = ({
     hour12: true,
   });
 
-  const downSpeed = sample?.down_mbps != null ? sample.down_mbps.toFixed(1) : '21.2';
-  const upSpeed = sample?.up_mbps != null ? sample.up_mbps.toFixed(1) : '1.5';
-  const latency = sample?.latency_ms != null ? Math.round(sample.latency_ms) : 73;
-  const packetLoss =
-    sample?.packet_loss_pct != null ? `${sample.packet_loss_pct}%` : '0%';
-  const jitter = sample?.jitter_ms != null ? `${sample.jitter_ms.toFixed(2)} ms` : '7.04 ms';
+  const downSpeed = sample?.down_mbps != null ? sample.down_mbps.toFixed(1) : NOT_MEASURED;
+  const upSpeed = sample?.up_mbps != null ? sample.up_mbps.toFixed(1) : NOT_MEASURED;
+  const latency = sample?.latency_ms != null ? Math.round(sample.latency_ms) : NOT_MEASURED;
+  const packetLoss = sample?.packet_loss_pct != null ? `${sample.packet_loss_pct}%` : NOT_MEASURED;
+  const jitter = sample?.jitter_ms != null ? `${sample.jitter_ms.toFixed(2)} ms` : NOT_MEASURED;
 
-  const carrier = sample?.carrier && sample.carrier !== '--' ? sample.carrier : 'Jio';
-  const radio = sample?.radio || (sample?.network === 'wifi' ? 'Wi-Fi' : '4G');
-  const coverageDbm = sample?.network === 'wifi' ? '-58 dBm' : '-101 dBm';
-
-  const serverDisplay =
-    carrier === 'Wi-Fi' ? 'TRAI Broadband Gateway - Mumbai' : `${carrier.toUpperCase()} - Core Server`;
+  const carrier = displayCarrier(sample);
+  const radio = displayRadio(sample);
+  const coverage = displaySignal(sample);
+  const serverDisplay = useTestServerHost();
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -151,7 +155,7 @@ export const SpeedTestResultView: React.FC<SpeedTestResultViewProps> = ({
                 <CoverageTestIcon size={15} color="#64748B" />
                 <Text style={styles.detailFieldLabel}>Coverage</Text>
               </View>
-              <Text style={styles.detailFieldValue}>{coverageDbm}</Text>
+              <Text style={styles.detailFieldValue}>{coverage}</Text>
             </View>
 
             <View style={styles.detailCol}>

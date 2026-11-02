@@ -9,7 +9,7 @@ class LocationService {
     this.initialized = true;
     Geolocation.setRNConfiguration({
       skipPermissionRequests: false,
-      authorizationLevel: 'always',
+      authorizationLevel: 'whenInUse',
       enableBackgroundLocationUpdates: true,
       locationProvider: 'auto',
     });

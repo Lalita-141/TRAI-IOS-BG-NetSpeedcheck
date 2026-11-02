@@ -1,16 +1,6 @@
 import { getConfig } from '../config';
 
-const geocodeCache: Record<string, string> = {
-  // Pre-seed common test locations for instant offline display
-  '37.786_-122.406': 'Union Square, San Francisco',
-  '37.785_-122.406': 'San Francisco, California',
-  '18.550_73.941': 'Kharadi, Pune',
-  '18.520_73.856': 'Pune, Maharashtra',
-  '19.076_72.877': 'Mumbai, Maharashtra',
-  '28.613_77.209': 'New Delhi, Delhi',
-  '12.971_77.594': 'Bengaluru, Karnataka',
-  '17.385_78.486': 'Hyderabad, Telangana',
-};
+const geocodeCache: Record<string, string> = {};
 
 export async function reverseGeocode(
   lat: number | null,
@@ -87,7 +77,7 @@ export async function reverseGeocode(
           '';
 
         const parts = [area, city].filter(Boolean);
-        const name = parts.length > 0 ? parts.join(', ') : addr.state || data?.display_name?.split(',')[0] || 'Local Area';
+        const name = parts.length > 0 ? parts.join(', ') : addr.state || data?.display_name?.split(',')[0] || `Area (${lat.toFixed(2)}°, ${lng.toFixed(2)}°)`;
         geocodeCache[key] = name;
         return name;
       }
@@ -96,13 +86,6 @@ export async function reverseGeocode(
     // Non-blocking fallback
   }
 
-  // Smart regional fallback if offline
-  if (Math.abs(lat - 37.78) < 0.1 && Math.abs(lng - -122.4) < 0.1) {
-    return 'Union Square, San Francisco';
-  }
-  if (Math.abs(lat - 18.55) < 0.1 && Math.abs(lng - 73.94) < 0.1) {
-    return 'Kharadi, Pune';
-  }
-
+  // Unresolved (e.g. offline): show the real coordinates
   return `Area (${lat.toFixed(2)}°, ${lng.toFixed(2)}°)`;
 }

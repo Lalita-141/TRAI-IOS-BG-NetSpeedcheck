@@ -30,13 +30,13 @@ interface CoverageMapViewProps {
 
 type MetricType = 'Coverage' | 'Download' | 'Upload' | 'Latency';
 type TechnologyType = 'All' | '5G' | '4G' | '2G';
-type OperatorType = 'Airtel' | 'BSNL & MTNL' | 'Jio' | 'Vi' | 'WIFI';
+type OperatorType = 'All' | 'Airtel' | 'BSNL & MTNL' | 'Jio' | 'Vi' | 'WIFI';
 type DropdownType = 'metric' | 'technology' | 'operator' | null;
 type MapType = 'map' | 'satellite';
 
 const METRIC_OPTIONS: MetricType[] = ['Coverage', 'Download', 'Upload', 'Latency'];
 const TECH_OPTIONS: TechnologyType[] = ['All', '5G', '4G', '2G'];
-const OPERATOR_OPTIONS: OperatorType[] = ['Airtel', 'BSNL & MTNL', 'Jio', 'Vi', 'WIFI'];
+const OPERATOR_OPTIONS: OperatorType[] = ['All', 'Airtel', 'BSNL & MTNL', 'Jio', 'Vi', 'WIFI'];
 
 // Common city centers for zero-latency instant jump
 const PRESET_CITIES: Record<string, { lat: number; lng: number }> = {
@@ -69,7 +69,7 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedMetric, setSelectedMetric] = useState<MetricType>('Coverage');
   const [selectedTech, setSelectedTech] = useState<TechnologyType>('All');
-  const [selectedOperator, setSelectedOperator] = useState<OperatorType>('Airtel');
+  const [selectedOperator, setSelectedOperator] = useState<OperatorType>('All');
   const [activeDropdown, setActiveDropdown] = useState<DropdownType>(null);
   const [mapType, setMapType] = useState<MapType>('map');
   const [isSearching, setIsSearching] = useState(false);
@@ -110,14 +110,16 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
           const data = await res.json();
           if (Array.isArray(data)) {
             const mapped = data.map((d: any) => ({
+              id: d.id,
               lat: d.lat,
               lng: d.lng,
-              down: d.down_mbps || 0,
-              up: d.up_mbps || 0,
-              ping: d.latency_ms || 0,
-              jitter: d.jitter_ms || 0,
-              carrier: d.carrier || 'Unknown',
-              tech: d.radio || 'Mobile',
+              down: d.down_mbps ?? null,
+              up: d.up_mbps ?? null,
+              ping: d.latency_ms ?? null,
+              signal: d.signal_dbm ?? null,
+              network: d.network ?? null,
+              carrier: d.carrier ?? null,
+              tech: d.radio ?? null,
               ts: d.ts,
               rating: d.rating,
               color: d.color,
@@ -165,14 +167,16 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
       samples
         .filter(s => s.lat != null && s.lng != null)
         .map(s => ({
+          id: s.id,
           lat: s.lat!,
           lng: s.lng!,
-          down: s.down_mbps || 0,
-          up: s.up_mbps || 0,
-          ping: s.latency_ms || 0,
-          jitter: s.jitter_ms || 0,
-          carrier: s.carrier || (s.network === 'wifi' ? 'WIFI' : 'Cellular'),
-          tech: s.radio || (s.network === 'wifi' ? 'WIFI' : '4G'),
+          down: s.down_mbps ?? null,
+          up: s.up_mbps ?? null,
+          ping: s.latency_ms ?? null,
+          signal: s.signal_dbm ?? null,
+          network: s.network ?? null,
+          carrier: s.carrier ?? null,
+          tech: s.radio ?? null,
           ts: s.ts,
         })),
     [samples]
@@ -180,7 +184,9 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
 
   // Combine local device test samples with server crowdsourced test samples
   const allSamples = useMemo(() => {
-    return [...validSamples, ...crowdsourcedSamples];
+    // This device's tests are on the server too: don't count them twice
+    const localIds = new Set(validSamples.map(s => s.id));
+    return [...validSamples, ...crowdsourcedSamples.filter(s => !localIds.has(s.id))];
   }, [validSamples, crowdsourcedSamples]);
 
   // Handle Search Location
@@ -385,10 +391,27 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
       color: #0284C7 !important;
       text-decoration: none !important;
     }
+    .badge-none { background: #F1F5F9; color: #64748B; }
+    #no-data {
+      display: none;
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      right: 12px;
+      z-index: 500;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.95);
+      color: #334155;
+      font-size: 12px;
+      font-weight: 600;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
   <div id="map"></div>
+  <div id="no-data">No tests recorded for this selection yet. Coverage appears here as real tests are run.</div>
 
   <script>
     var centerLat = ${defaultCenter.lat};
@@ -433,7 +456,6 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
       map.flyTo([lat, lng], zoom || 11, { duration: 1.2 });
       centerLat = lat;
       centerLng = lng;
-      renderHexagons();
     };
 
     // Hexagon Layer Group
@@ -460,191 +482,159 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
       return coords;
     }
 
-    // Seeded pseudo-random generator for consistent regional simulation
-    function pseudoRandom(seed) {
-      var x = Math.sin(seed++) * 10000;
-      return x - Math.floor(x);
+    var COLOR_NONE = '#94A3B8';
+
+    // Crowdsourced points are already filtered by the server; this device's own tests are filtered here
+    function matchesFilters(s) {
+      if (s.isCrowdsourced) return true;
+      var carrier = (s.carrier || '').toLowerCase();
+      if (currentOperator === 'WIFI') {
+        if (s.network !== 'wifi') return false;
+      } else if (currentOperator === 'BSNL & MTNL') {
+        if (carrier.indexOf('bsnl') < 0 && carrier.indexOf('mtnl') < 0) return false;
+      } else if (currentOperator !== 'All') {
+        if (carrier.indexOf(currentOperator.toLowerCase()) < 0) return false;
+      }
+      if (currentTech !== 'All' && (s.tech || '').indexOf(currentTech) < 0) return false;
+      return true;
     }
 
-    // Realistic Connected Hexagonal Grid Generator
+    function metricValue(s) {
+      if (currentMetric === 'Download') return s.down;
+      if (currentMetric === 'Upload') return s.up;
+      if (currentMetric === 'Latency') return s.ping;
+      return s.signal;
+    }
+
+    // 3 = Excellent ... 0 = Poor, null = this test did not measure the metric
+    function scoreOf(s) {
+      var v = metricValue(s);
+      if (v == null) return null;
+      var limits;
+      if (currentMetric === 'Latency') {
+        return v < 25 ? 3 : v < 50 ? 2 : v < 100 ? 1 : 0;
+      } else if (currentMetric === 'Download') {
+        limits = [50, 25, 10];
+      } else if (currentMetric === 'Upload') {
+        limits = [20, 10, 5];
+      } else {
+        // Wi-Fi RSSI and cellular signal use different scales
+        limits = s.network === 'wifi' ? [-55, -67, -75] : [-85, -95, -105];
+      }
+      return v >= limits[0] ? 3 : v >= limits[1] ? 2 : v >= limits[2] ? 1 : 0;
+    }
+
+    function ratingOf(score) {
+      if (score == null) return { rating: 'No signal data', color: COLOR_NONE, badge: 'badge-none' };
+      if (score >= 2.5) return { rating: 'Excellent', color: COLOR_EXCELLENT, badge: 'badge-excellent' };
+      if (score >= 1.5) return { rating: 'Better', color: COLOR_BETTER, badge: 'badge-better' };
+      if (score >= 0.5) return { rating: 'Good', color: COLOR_GOOD, badge: 'badge-good' };
+      return { rating: 'Poor', color: COLOR_POOR, badge: 'badge-poor' };
+    }
+
+    // Coverage shows every real test (a test without dBm is still real service data);
+    // a speed metric only shows tests that measured that speed.
+    function visibleSamples() {
+      return userSamples.filter(function(s) {
+        return matchesFilters(s) && (currentMetric === 'Coverage' || metricValue(s) != null);
+      });
+    }
+
+    function average(list, field, digits) {
+      var nums = list.map(function(s) { return s[field]; }).filter(function(v) { return v != null; });
+      if (nums.length === 0) return '--';
+      var sum = nums.reduce(function(a, b) { return a + b; }, 0);
+      return (sum / nums.length).toFixed(digits);
+    }
+
+    function popupRow(label, value) {
+      return '<div class="popup-row"><span>' + label + '</span><span class="popup-val">' + value + '</span></div>';
+    }
+
+    // One hexagon per area that has real tests. Areas without tests stay empty.
     function renderHexagons() {
       hexagonLayerGroup.clearLayers();
 
       var r = 0.015; // hexagon radius ~1.5km
       var deltaLat = 1.5 * r;
-      var latScale = Math.cos(centerLat * Math.PI / 180);
-      var deltaLng = Math.sqrt(3) * r / latScale;
+      var cells = {};
+      var visible = visibleSamples();
 
-      // Hexagonal cluster shape bounds around center
-      var rows = 12;
-      var cols = 12;
+      visible.forEach(function(s) {
+        var row = Math.round(s.lat / deltaLat);
+        var hLat = row * deltaLat;
+        var deltaLng = Math.sqrt(3) * r / Math.cos(hLat * Math.PI / 180);
+        var colOffset = (Math.abs(row) % 2 === 1) ? (deltaLng / 2) : 0;
+        var col = Math.round((s.lng - colOffset) / deltaLng);
+        var key = row + '_' + col;
+        if (!cells[key]) cells[key] = { lat: hLat, lng: col * deltaLng + colOffset, samples: [] };
+        cells[key].samples.push(s);
+      });
 
-      for (var row = -Math.floor(rows / 2); row <= Math.floor(rows / 2); row++) {
-        for (var col = -Math.floor(cols / 2); col <= Math.floor(cols / 2); col++) {
-          var dist = Math.sqrt(row * row + col * col);
-          // Realistic clustered shape (like in user screenshot)
-          var jitterShape = pseudoRandom(row * 31 + col * 17);
-          if (dist > 5.5 + jitterShape * 1.5) continue;
+      document.getElementById('no-data').style.display = visible.length === 0 ? 'block' : 'none';
 
-          // Some scattered suburban outliers as in screenshot
-          if (dist > 3.8 && jitterShape < 0.35) continue;
+      Object.keys(cells).forEach(function(key) {
+        var cell = cells[key];
+        var scores = cell.samples.map(scoreOf).filter(function(v) { return v != null; });
+        var meanScore = scores.length === 0 ? null : scores.reduce(function(a, b) { return a + b; }, 0) / scores.length;
+        var result = ratingOf(meanScore);
 
-          var hLat = centerLat + row * deltaLat;
-          var colOffset = (Math.abs(row) % 2 === 1) ? (deltaLng / 2) : 0;
-          var hLng = centerLng + col * deltaLng + colOffset;
+        var polygon = L.polygon(getHexagonVertices(cell.lat, cell.lng, r), {
+          color: '#FFFFFF',
+          weight: 1.5,
+          opacity: 0.95,
+          fillColor: result.color,
+          fillOpacity: 0.72,
+          smoothFactor: 1
+        });
 
-          var cellSeed = Math.abs(Math.sin(hLat * 12.9898 + hLng * 78.233)) * 43758.5453;
-          var randVal = cellSeed - Math.floor(cellSeed);
+        var hasCrowd = cell.samples.some(function(s) { return s.isCrowdsourced; });
+        var popupContent =
+          '<div class="popup-container">' +
+            '<div class="popup-header">' +
+              '<span class="popup-title">' + currentOperator + ' Coverage</span>' +
+              '<span class="popup-badge ' + result.badge + '">' + result.rating + '</span>' +
+            '</div>' +
+            popupRow('Avg Signal:', average(cell.samples, 'signal', 0) + ' dBm') +
+            popupRow('Avg Download:', average(cell.samples, 'down', 1) + ' Mbps') +
+            popupRow('Avg Upload:', average(cell.samples, 'up', 1) + ' Mbps') +
+            popupRow('Avg Latency:', average(cell.samples, 'ping', 0) + ' ms') +
+            popupRow('Tests here:', cell.samples.length) +
+            '<div class="popup-op"><span>&#9679;</span> ' + (hasCrowd ? 'Crowdsourced tests' : 'My tests') + '</div>' +
+          '</div>';
 
-          // Operator profile adjustments
-          var opFactor = 0;
-          if (currentOperator === 'Airtel') opFactor = 0.15;
-          else if (currentOperator === 'Jio') opFactor = 0.2;
-          else if (currentOperator === 'Vi') opFactor = -0.05;
-          else if (currentOperator === 'BSNL & MTNL') opFactor = -0.25;
-          else if (currentOperator === 'WIFI') opFactor = (dist < 2.5 ? 0.3 : -0.5);
-
-          // Tech profile adjustments
-          var techFactor = 0;
-          if (currentTech === '5G') techFactor = (dist < 3.2 ? 0.35 : -0.3);
-          else if (currentTech === '4G') techFactor = 0.1;
-          else if (currentTech === '2G') techFactor = -0.3;
-
-          // Urban center score (center has better coverage)
-          var centerScore = 1 - (dist / 6.0);
-          var totalScore = centerScore * 0.5 + randVal * 0.35 + opFactor + techFactor;
-
-          var rating = 'Good';
-          var color = COLOR_GOOD;
-          var badgeClass = 'badge-good';
-          var speedDown = 22.4;
-          var speedUp = 8.5;
-          var latency = 38;
-
-          if (totalScore >= 0.72) {
-            rating = 'Excellent';
-            color = COLOR_EXCELLENT;
-            badgeClass = 'badge-excellent';
-            speedDown = Math.round((65 + randVal * 85) * 10) / 10;
-            speedUp = Math.round((20 + randVal * 30) * 10) / 10;
-            latency = Math.round(14 + randVal * 12);
-          } else if (totalScore >= 0.50) {
-            rating = 'Better';
-            color = COLOR_BETTER;
-            badgeClass = 'badge-better';
-            speedDown = Math.round((35 + randVal * 30) * 10) / 10;
-            speedUp = Math.round((12 + randVal * 12) * 10) / 10;
-            latency = Math.round(24 + randVal * 16);
-          } else if (totalScore >= 0.28) {
-            rating = 'Good';
-            color = COLOR_GOOD;
-            badgeClass = 'badge-good';
-            speedDown = Math.round((14 + randVal * 20) * 10) / 10;
-            speedUp = Math.round((4 + randVal * 8) * 10) / 10;
-            latency = Math.round(40 + randVal * 25);
-          } else {
-            rating = 'Poor';
-            color = COLOR_POOR;
-            badgeClass = 'badge-poor';
-            speedDown = Math.round((2 + randVal * 8) * 10) / 10;
-            speedUp = Math.round((0.8 + randVal * 3) * 10) / 10;
-            latency = Math.round(75 + randVal * 45);
-          }
-
-          // Check if any real user sample falls in this hexagon
-          var matchingSample = userSamples.find(function(s) {
-            var dLat = Math.abs(s.lat - hLat);
-            var dLng = Math.abs(s.lng - hLng);
-            return dLat < r && dLng < r;
-          });
-
-          if (matchingSample) {
-            speedDown = Math.round(matchingSample.down * 10) / 10;
-            speedUp = Math.round(matchingSample.up * 10) / 10;
-            latency = Math.round(matchingSample.ping);
-            if (currentMetric === 'Latency') {
-              if (latency < 25) { rating = 'Excellent'; color = COLOR_EXCELLENT; badgeClass = 'badge-excellent'; }
-              else if (latency < 50) { rating = 'Better'; color = COLOR_BETTER; badgeClass = 'badge-better'; }
-              else if (latency < 100) { rating = 'Good'; color = COLOR_GOOD; badgeClass = 'badge-good'; }
-              else { rating = 'Poor'; color = COLOR_POOR; badgeClass = 'badge-poor'; }
-            } else if (currentMetric === 'Upload') {
-              if (speedUp >= 20) { rating = 'Excellent'; color = COLOR_EXCELLENT; badgeClass = 'badge-excellent'; }
-              else if (speedUp >= 10) { rating = 'Better'; color = COLOR_BETTER; badgeClass = 'badge-better'; }
-              else if (speedUp >= 5) { rating = 'Good'; color = COLOR_GOOD; badgeClass = 'badge-good'; }
-              else { rating = 'Poor'; color = COLOR_POOR; badgeClass = 'badge-poor'; }
-            } else {
-              if (speedDown >= 50) { rating = 'Excellent'; color = COLOR_EXCELLENT; badgeClass = 'badge-excellent'; }
-              else if (speedDown >= 25) { rating = 'Better'; color = COLOR_BETTER; badgeClass = 'badge-better'; }
-              else if (speedDown >= 10) { rating = 'Good'; color = COLOR_GOOD; badgeClass = 'badge-good'; }
-              else { rating = 'Poor'; color = COLOR_POOR; badgeClass = 'badge-poor'; }
-            }
-          }
-
-          var hexCoords = getHexagonVertices(hLat, hLng, r);
-
-          var polygon = L.polygon(hexCoords, {
-            color: '#FFFFFF',
-            weight: 1.5,
-            opacity: 0.95,
-            fillColor: color,
-            fillOpacity: 0.72,
-            smoothFactor: 1
-          });
-
-          var techLabel = currentTech === 'All' ? '5G / 4G' : currentTech;
-          var isCloudData = matchingSample && matchingSample.isCrowdsourced;
-          var sourceBadge = isCloudData
-            ? 'Live TRAI Crowdsourced'
-            : (matchingSample ? 'My Measured Test' : currentOperator + ' Verified Grid');
-          var popupContent =
-            '<div class="popup-container">' +
-              '<div class="popup-header">' +
-                '<span class="popup-title">' + currentOperator + ' Coverage</span>' +
-                '<span class="popup-badge ' + badgeClass + '">' + rating + '</span>' +
-              '</div>' +
-              '<div class="popup-row"><span>Download:</span><span class="popup-val" style="color:' + color + ';">' + speedDown + ' Mbps</span></div>' +
-              '<div class="popup-row"><span>Upload:</span><span class="popup-val">' + speedUp + ' Mbps</span></div>' +
-              '<div class="popup-row"><span>Latency:</span><span class="popup-val">' + latency + ' ms</span></div>' +
-              '<div class="popup-row"><span>Technology:</span><span class="popup-val">' + techLabel + '</span></div>' +
-              '<div class="popup-op">' +
-                '<span>&#9679;</span> ' + sourceBadge +
-              '</div>' +
-            '</div>';
-
-          polygon.bindPopup(popupContent, { maxWidth: 240, closeButton: false });
-          hexagonLayerGroup.addLayer(polygon);
-        }
-      }
+        polygon.bindPopup(popupContent, { maxWidth: 240, closeButton: false });
+        hexagonLayerGroup.addLayer(polygon);
+      });
     }
 
-    // Render user sample markers (glowing pinpoint markers)
+    // Render each real test as a pinpoint marker
     function renderUserSamplePins() {
       sampleMarkerGroup.clearLayers();
-      userSamples.forEach(function(s) {
-        var pColor = COLOR_EXCELLENT;
-        if (s.down < 10) pColor = COLOR_POOR;
-        else if (s.down < 25) pColor = COLOR_GOOD;
-        else if (s.down < 50) pColor = COLOR_BETTER;
+      visibleSamples().forEach(function(s) {
+        var result = ratingOf(scoreOf(s));
 
         var circle = L.circleMarker([s.lat, s.lng], {
           radius: 6,
-          fillColor: pColor,
+          fillColor: result.color,
           color: '#FFFFFF',
           weight: 2,
           opacity: 1,
           fillOpacity: 1
         });
 
+        var fmt = function(v, digits, unit) { return v == null ? '--' : v.toFixed(digits) + unit; };
         var pop =
           '<div class="popup-container">' +
             '<div class="popup-header">' +
-              '<span class="popup-title">My Measured Test</span>' +
-              '<span class="popup-badge badge-better">' + s.down.toFixed(1) + 'M</span>' +
+              '<span class="popup-title">' + (s.isCrowdsourced ? 'Crowdsourced Test' : 'My Test') + '</span>' +
+              '<span class="popup-badge ' + result.badge + '">' + result.rating + '</span>' +
             '</div>' +
-            '<div class="popup-row"><span>Download:</span><span class="popup-val">' + s.down.toFixed(1) + ' Mbps</span></div>' +
-            '<div class="popup-row"><span>Upload:</span><span class="popup-val">' + s.up.toFixed(1) + ' Mbps</span></div>' +
-            '<div class="popup-row"><span>Ping:</span><span class="popup-val">' + Math.round(s.ping) + ' ms</span></div>' +
-            '<div class="popup-row"><span>Carrier:</span><span class="popup-val">' + s.carrier + '</span></div>' +
+            popupRow('Signal:', fmt(s.signal, 0, ' dBm')) +
+            popupRow('Download:', fmt(s.down, 1, ' Mbps')) +
+            popupRow('Upload:', fmt(s.up, 1, ' Mbps')) +
+            popupRow('Ping:', fmt(s.ping, 0, ' ms')) +
+            popupRow('Carrier:', s.carrier || '--') +
           '</div>';
 
         circle.bindPopup(pop, { closeButton: false });
@@ -656,7 +646,9 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
     window.updateCrowdsourceSamples = function(newSamples) {
       if (Array.isArray(newSamples)) {
         var localPersonal = userSamples.filter(function(s) { return !s.isCrowdsourced; });
-        userSamples = localPersonal.concat(newSamples);
+        var localIds = {};
+        localPersonal.forEach(function(s) { localIds[s.id] = true; });
+        userSamples = localPersonal.concat(newSamples.filter(function(s) { return !localIds[s.id]; }));
         renderHexagons();
         renderUserSamplePins();
       }
@@ -668,6 +660,7 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
       currentTech = tech;
       currentMetric = metric;
       renderHexagons();
+      renderUserSamplePins();
     };
 
     // Initial render
@@ -860,6 +853,11 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
         <View style={styles.legendPill}>
           <Text style={styles.legendPillText}>Poor</Text>
           <View style={[styles.legendDot, styles.dotPoor]} />
+        </View>
+
+        <View style={styles.legendPill}>
+          <Text style={styles.legendPillText}>No dBm</Text>
+          <View style={[styles.legendDot, styles.dotNone]} />
         </View>
       </View>
 
@@ -1239,6 +1237,9 @@ const styles = StyleSheet.create({
   },
   dotPoor: {
     backgroundColor: '#EF4444',
+  },
+  dotNone: {
+    backgroundColor: '#94A3B8',
   },
   dropdownOverlay: {
     ...StyleSheet.absoluteFill,

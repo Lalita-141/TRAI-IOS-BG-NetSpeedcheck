@@ -54,7 +54,7 @@ export const OperatorBenchmarks: React.FC<OperatorBenchmarksProps> = ({ analytic
                     {op.carrier}
                   </span>{' '}
                   <span className="pill-badge pill-5g" style={{ marginLeft: 6, fontSize: '10px' }}>
-                    {op.radio || 'Mobile'}
+                    {op.radio || '--'}
                   </span>
                 </div>
                 <div className="carrier-metric-val" style={{ color: '#F8FAFC' }}>

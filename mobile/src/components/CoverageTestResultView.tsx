@@ -19,6 +19,7 @@ import {
 import { Sample } from '../types';
 import { reverseGeocode } from '../services/geocodeService';
 import { CoverageTestResults } from './CoverageTestProgressView';
+import { NOT_MEASURED, displayCarrier, displayRadio, signalUnavailableText } from '../utils/sampleDisplay';
 
 interface CoverageTestResultViewProps {
   sample: Sample | null;
@@ -56,14 +57,22 @@ export const CoverageTestResultView: React.FC<CoverageTestResultViewProps> = ({
     hour12: true,
   });
 
-  const signalDbm = results?.signalDbm ?? (sample?.network === 'wifi' ? -58 : -88);
-  const signalQuality = results?.signalQuality ?? (signalDbm > -80 ? 'Excellent' : 'Good');
-  const carrier = results?.carrierName || (sample?.carrier && sample.carrier !== '--' ? sample.carrier : 'Airtel');
-  const radio = results?.radioTech || sample?.radio || (sample?.network === 'wifi' ? 'Wi-Fi' : '5G');
-  const gpsAccuracy = results?.gpsAccuracy ?? Math.round(sample?.accuracy || 8);
-  const cellTower = results?.cellTower || `${carrier.toUpperCase()} - Sector 04 NodeB`;
-  const frequencyBand = results?.frequencyBand || (sample?.network === 'wifi' ? '5.2 GHz' : 'Band 40');
-  const testId = (sample?.id ? sample.id : 'cov9a').slice(-4);
+  const signalDbm = results?.signalDbm ?? null;
+  const connected = results?.connected ?? false;
+  const heroQuality = results?.signalQuality
+    ? `${results.signalQuality} Signal`
+    : connected
+    ? 'Connected'
+    : 'No Service';
+  const carrier = results?.carrierName || displayCarrier(sample);
+  const radio = results?.radioTech || displayRadio(sample);
+  const gpsAccuracy = results?.gpsAccuracy != null ? `±${results.gpsAccuracy}m` : NOT_MEASURED;
+  const latency = results?.latencyMs != null ? `${results.latencyMs} ms` : NOT_MEASURED;
+  const packetLoss = results?.packetLossPct != null ? `${results.packetLossPct}%` : NOT_MEASURED;
+  const signalText = signalDbm != null ? `${signalDbm} dBm` : signalUnavailableText();
+  const cellDetails =
+    [results?.cellTower, results?.frequencyBand].filter(Boolean).join(' • ') || signalUnavailableText();
+  const testId = sample?.id ? sample.id.slice(-4) : NOT_MEASURED;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -84,15 +93,17 @@ export const CoverageTestResultView: React.FC<CoverageTestResultViewProps> = ({
         <View style={styles.heroCard}>
           <View style={styles.heroSignalHeader}>
             <View style={styles.heroSignalValueRow}>
-              <Text style={styles.heroSignalNumber}>{signalDbm}</Text>
+              <Text style={styles.heroSignalNumber}>{signalDbm ?? NOT_MEASURED}</Text>
               <Text style={styles.heroSignalUnit}>dBm</Text>
             </View>
             <View style={styles.heroQualityBadge}>
               <View style={styles.heroQualityDot} />
-              <Text style={styles.heroQualityText}>{signalQuality} Signal</Text>
+              <Text style={styles.heroQualityText}>{heroQuality}</Text>
             </View>
           </View>
-          <Text style={styles.heroSignalLabel}>RF Signal Strength (RSSI / RSRP)</Text>
+          <Text style={styles.heroSignalLabel}>
+            {signalDbm != null ? 'Signal Strength' : `Signal Strength: ${signalUnavailableText()}`}
+          </Text>
 
           <View style={styles.heroDivider} />
 
@@ -106,15 +117,15 @@ export const CoverageTestResultView: React.FC<CoverageTestResultViewProps> = ({
             <View style={styles.heroSubDivider} />
 
             <View style={styles.heroSubCol}>
-              <Text style={styles.heroSubValue}>±{gpsAccuracy}m</Text>
+              <Text style={styles.heroSubValue}>{gpsAccuracy}</Text>
               <Text style={styles.heroSubLabel}>GPS Accuracy</Text>
             </View>
 
             <View style={styles.heroSubDivider} />
 
             <View style={styles.heroSubCol}>
-              <Text style={styles.heroSubValue}>{frequencyBand}</Text>
-              <Text style={styles.heroSubLabel}>Frequency</Text>
+              <Text style={styles.heroSubValue}>{latency}</Text>
+              <Text style={styles.heroSubLabel}>Latency</Text>
             </View>
           </View>
         </View>
@@ -130,7 +141,7 @@ export const CoverageTestResultView: React.FC<CoverageTestResultViewProps> = ({
                 <CoverageTestIcon size={15} color="#64748B" />
                 <Text style={styles.detailFieldLabel}>Coverage</Text>
               </View>
-              <Text style={styles.detailFieldValue}>{signalDbm} dBm</Text>
+              <Text style={styles.detailFieldValue}>{signalText}</Text>
             </View>
 
             <View style={styles.detailCol}>
@@ -185,9 +196,20 @@ export const CoverageTestResultView: React.FC<CoverageTestResultViewProps> = ({
           <View style={styles.detailFullRow}>
             <View style={styles.detailIconLabelRow}>
               <ServerIcon size={15} color="#64748B" />
-              <Text style={styles.detailFieldLabel}>Connected Cell Tower / Node</Text>
+              <Text style={styles.detailFieldLabel}>Cell Tower / Frequency</Text>
             </View>
-            <Text style={styles.detailFullValue}>{cellTower}</Text>
+            <Text style={styles.detailFullValue}>{cellDetails}</Text>
+          </View>
+
+          <View style={styles.detailsDivider} />
+
+          {/* Row: Reachability */}
+          <View style={styles.detailFullRow}>
+            <View style={styles.detailIconLabelRow}>
+              <SignalBarsIcon size={15} color="#64748B" />
+              <Text style={styles.detailFieldLabel}>Failed Requests to Test Server</Text>
+            </View>
+            <Text style={styles.detailFullValue}>{packetLoss}</Text>
           </View>
 
           <View style={styles.detailsDivider} />

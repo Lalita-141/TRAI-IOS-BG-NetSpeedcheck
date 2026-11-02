@@ -73,7 +73,7 @@ export interface MapPoint {
   ts: number;
   metric: string;
   metric_value: number;
-  rating: 'Excellent' | 'Better' | 'Good' | 'Poor';
+  rating: 'Excellent' | 'Better' | 'Good' | 'Poor' | 'No signal data';
   color: string;
 }
 

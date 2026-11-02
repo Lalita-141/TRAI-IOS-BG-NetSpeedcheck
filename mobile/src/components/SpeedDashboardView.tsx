@@ -9,7 +9,6 @@ import {
   Alert,
 } from 'react-native';
 import { AppConfig, Sample } from '../types';
-import { sampleStore } from '../services/sampleStore';
 import { uploader } from '../services/uploader';
 import { SpeedGauge } from './SpeedGauge';
 import { MonitorStatus } from '../services/monitorService';
@@ -61,6 +60,8 @@ import {
   describeSchedule,
 } from '../services/scheduledTestService';
 
+import { NOT_MEASURED, displayCarrier, displayRadio } from '../utils/sampleDisplay';
+
 const formatScheduleTime = (ts: number) =>
   new Date(ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
@@ -106,8 +107,10 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
 
   // Video & Browser Test State
   const [videoResults, setVideoResults] = useState<VideoBrowserTestResults | null>(null);
+  const [videoSample, setVideoSample] = useState<Sample | null>(null);
   // Coverage Test State
   const [coverageResults, setCoverageResults] = useState<CoverageTestResults | null>(null);
+  const [coverageSample, setCoverageSample] = useState<Sample | null>(null);
   // Advance Tests Modal State
   const [showAdvanceModal, setShowAdvanceModal] = useState<boolean>(false);
 
@@ -186,23 +189,10 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
   const last = status.lastSample;
   const lastSpeed = last?.down_mbps ?? 0;
 
-  const carrierName =
-    last?.carrier && last.carrier !== '--' && last.carrier !== 'wifi'
-      ? last.carrier
-      : last?.network === 'wifi'
-        ? 'Wi-Fi'
-        : last?.radio || 'Cellular';
-
-  const radioTech = last?.radio || (last?.network === 'wifi' ? 'Wi-Fi' : '4G');
-  const carrierPillText = `${carrierName}_${radioTech}`;
-
-  // Estimate signal dBm based on connection type
-  const calculatedDbm =
-    last?.network === 'wifi'
-      ? -58
-      : last?.accuracy && last.accuracy < 15
-        ? -88
-        : -101;
+  // What the last real test measured; nothing is shown before the first test
+  const carrierPillText = last
+    ? [displayCarrier(last), displayRadio(last)].filter(v => v !== NOT_MEASURED).join('_') || NOT_MEASURED
+    : 'No test yet';
 
   const handleStartCurrentTest = () => {
     if (activeTestType === 'speed') {
@@ -232,7 +222,7 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
     return (
       <SpeedTestResultView
         sample={status.lastSample}
-        testId={status.lastSample?.id ? status.lastSample.id.slice(-2) : '9'}
+        testId={status.lastSample?.id ? status.lastSample.id.slice(-2) : NOT_MEASURED}
         onBack={() => setScreenMode('home')}
         onRunVideoBrowserTest={() => {
           setActiveTestType('video_browser');
@@ -247,31 +237,10 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
     return (
       <VideoBrowserTestProgressView
         onCancel={() => setScreenMode('home')}
-        onComplete={res => {
+        onComplete={(res, sample) => {
           setVideoResults(res);
+          setVideoSample(sample);
           setScreenMode('video_result');
-          const base = status.lastSample;
-          const s: Sample = {
-            id: `vid_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            device_id: base?.device_id || 'dev',
-            ts: Math.floor(Date.now() / 1000),
-            down_mbps: res.ttfbMs ? parseFloat((1200 / res.ttfbMs * 12).toFixed(1)) : (base?.down_mbps || 32.5),
-            up_mbps: base?.up_mbps || 14.0,
-            latency_ms: res.videoDelayMs || 42,
-            jitter_ms: 10.5,
-            packet_loss_pct: 0,
-            network: base?.network || 'cellular',
-            radio: base?.radio || '5G',
-            carrier: base?.carrier || 'Airtel',
-            device_model: base?.device_model || 'Mobile Device',
-            os_platform: base?.os_platform || 'Mobile OS',
-            location_type: base?.location_type || 'Outdoor',
-            lat: base?.lat ?? null,
-            lng: base?.lng ?? null,
-            accuracy: base?.accuracy ?? null,
-            test_type: 'video',
-          };
-          sampleStore.add(s);
         }}
       />
     );
@@ -282,8 +251,8 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
     return (
       <VideoBrowserTestResultView
         results={videoResults}
-        sample={status.lastSample}
-        testId={status.lastSample?.id ? status.lastSample.id.slice(-2) : '10'}
+        sample={videoSample}
+        testId={videoSample?.id ? videoSample.id.slice(-2) : NOT_MEASURED}
         onBack={() => setScreenMode('home')}
         onRunSpeedTest={() => {
           setActiveTestType('speed');
@@ -298,33 +267,11 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
   if (screenMode === 'coverage_testing') {
     return (
       <CoverageTestProgressView
-        status={status}
         onCancel={() => setScreenMode('home')}
-        onComplete={res => {
+        onComplete={(res, sample) => {
           setCoverageResults(res);
+          setCoverageSample(sample);
           setScreenMode('coverage_result');
-          const base = status.lastSample;
-          const s: Sample = {
-            id: `cov_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            device_id: base?.device_id || 'dev',
-            ts: Math.floor(Date.now() / 1000),
-            down_mbps: res.signalDbm ? Math.max(5, Math.round(120 + res.signalDbm)) : (base?.down_mbps || 24.5),
-            up_mbps: base?.up_mbps || 8.5,
-            latency_ms: base?.latency_ms || 35,
-            jitter_ms: 8.0,
-            packet_loss_pct: 0,
-            network: base?.network || 'cellular',
-            radio: res.radioTech || base?.radio || '4G',
-            carrier: res.carrierName || base?.carrier || 'Airtel',
-            device_model: base?.device_model || 'Mobile Device',
-            os_platform: base?.os_platform || 'Mobile OS',
-            location_type: base?.location_type || 'Outdoor',
-            lat: base?.lat ?? null,
-            lng: base?.lng ?? null,
-            accuracy: res.gpsAccuracy || base?.accuracy || null,
-            test_type: 'coverage',
-          };
-          sampleStore.add(s);
         }}
       />
     );
@@ -334,7 +281,7 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
   if (screenMode === 'coverage_result') {
     return (
       <CoverageTestResultView
-        sample={status.lastSample}
+        sample={coverageSample}
         results={coverageResults}
         onBack={() => setScreenMode('home')}
         onRunSpeedTest={() => {
@@ -507,10 +454,12 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
             <View style={styles.statusDotGreen} />
           </View>
 
-          <View style={styles.coveragePill}>
-            <SignalBarsIcon size={14} color="#10B981" />
-            <Text style={styles.coveragePillText}>{t('filter_coverage', 'Coverage')}: {calculatedDbm} dBm</Text>
-          </View>
+          {last?.signal_dbm != null && (
+            <View style={styles.coveragePill}>
+              <SignalBarsIcon size={14} color="#10B981" />
+              <Text style={styles.coveragePillText}>{t('filter_coverage', 'Coverage')}: {Math.round(last.signal_dbm)} dBm</Text>
+            </View>
+          )}
         </View>
 
         {/* Central START Button / Speed Gauge */}
@@ -732,7 +681,7 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
                 <View>
                   <Text style={styles.viewResultTitle}>Latest Video & Browser Result</Text>
                   <Text style={styles.viewResultSubtitle}>
-                    {videoResults.videoDelayMs} ms Video Delay • {videoResults.webDelayMs} ms Web Delay
+                    {videoResults.videoDelayMs ?? NOT_MEASURED} ms Video Delay • {videoResults.webDelayMs ?? NOT_MEASURED} ms Web Delay
                   </Text>
                 </View>
               </View>
@@ -770,7 +719,11 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
                 <View>
                   <Text style={styles.viewResultTitle}>Latest Coverage Result</Text>
                   <Text style={styles.viewResultSubtitle}>
-                    {coverageResults.signalDbm} dBm • {coverageResults.signalQuality} Signal
+                    {coverageResults.signalDbm != null
+                      ? `${coverageResults.signalDbm} dBm • ${coverageResults.signalQuality} Signal`
+                      : coverageResults.connected
+                      ? `Connected • ${coverageResults.latencyMs ?? NOT_MEASURED} ms latency`
+                      : 'No Service'}
                   </Text>
                 </View>
               </View>

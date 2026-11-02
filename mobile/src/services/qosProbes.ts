@@ -38,41 +38,42 @@ export function qualityForMbps(mbps: number): string {
   return '360p';
 }
 
-/**
- * Measures video start-up delay / streaming throughput (/test-video) and web
- * page TTFB / load time (/test-webpage) against the QoS server.
- */
-export async function measureVideoAndWeb(serverUrl: string): Promise<VideoWebProbeResult> {
+/** Video start-up delay and streaming throughput, from /test-video on the QoS server. */
+export async function measureVideo(serverUrl: string) {
   const cleanUrl = serverUrl.replace(/\/+$/, '');
-  const result: VideoWebProbeResult = {
-    videoDelayMs: null,
-    videoMbps: null,
-    streamingQuality: null,
-    ttfbMs: null,
-    pageLoadSec: null,
-  };
-
   try {
     const video = await timedFetch(`${cleanUrl}/test-video?_t=${Date.now()}`, 15000);
-    if (video) {
-      result.videoDelayMs = video.firstByteMs;
+    if (video && video.bytes > 0) {
       const mbps = (video.bytes * 8) / 1_000_000 / (video.totalMs / 1000);
-      result.videoMbps = parseFloat(mbps.toFixed(2));
-      result.streamingQuality = qualityForMbps(mbps);
+      return {
+        videoDelayMs: video.firstByteMs as number | null,
+        videoMbps: parseFloat(mbps.toFixed(2)) as number | null,
+        streamingQuality: qualityForMbps(mbps) as string | null,
+      };
     }
   } catch (err) {
     console.warn('Video probe failed:', err);
   }
+  return { videoDelayMs: null, videoMbps: null, streamingQuality: null };
+}
 
+/** Web page time-to-first-byte and load time, from /test-webpage on the QoS server. */
+export async function measureWeb(serverUrl: string) {
+  const cleanUrl = serverUrl.replace(/\/+$/, '');
   try {
     const web = await timedFetch(`${cleanUrl}/test-webpage?_t=${Date.now()}`, 8000);
     if (web) {
-      result.ttfbMs = web.firstByteMs;
-      result.pageLoadSec = parseFloat((web.totalMs / 1000).toFixed(2));
+      return {
+        ttfbMs: web.firstByteMs as number | null,
+        pageLoadSec: parseFloat((web.totalMs / 1000).toFixed(2)) as number | null,
+      };
     }
   } catch (err) {
     console.warn('Web page probe failed:', err);
   }
+  return { ttfbMs: null, pageLoadSec: null };
+}
 
-  return result;
+export async function measureVideoAndWeb(serverUrl: string): Promise<VideoWebProbeResult> {
+  return { ...(await measureVideo(serverUrl)), ...(await measureWeb(serverUrl)) };
 }

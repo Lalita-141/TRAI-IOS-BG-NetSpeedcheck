@@ -343,58 +343,65 @@ app.get('/v1/crowdsource/map', async (req, res) => {
   try {
     const [rows] = await pool.query(sql, params);
 
-    // Compute Color and Rating for each point based on selected metric
-    const formatted = rows.map(r => {
-      let metricValue = 0;
-      let rating = 'Good';
-      let color = '#F59E0B'; // Amber default
+    // Rate each point on the metric's real measured value. No value means no rating:
+    // nothing is estimated from another metric.
+    const mLower = (metric || '').toLowerCase();
+    const isDownload = mLower === 'download' || mLower === 'download speed';
+    const isUpload = mLower === 'upload' || mLower === 'upload speed';
+    const isLatency = mLower === 'latency';
+    const isCoverage = !isDownload && !isUpload && !isLatency;
 
-      const mLower = (metric || '').toLowerCase();
-      if (mLower === 'download' || mLower === 'download speed') {
-        metricValue = r.down_mbps || 0;
-        if (metricValue >= 50) { rating = 'Excellent'; color = '#10B981'; }
-        else if (metricValue >= 25) { rating = 'Better'; color = '#06B6D4'; }
-        else if (metricValue >= 10) { rating = 'Good'; color = '#F59E0B'; }
-        else { rating = 'Poor'; color = '#EF4444'; }
-      } else if (mLower === 'upload' || mLower === 'upload speed') {
-        metricValue = r.up_mbps || 0;
-        if (metricValue >= 20) { rating = 'Excellent'; color = '#10B981'; }
-        else if (metricValue >= 10) { rating = 'Better'; color = '#06B6D4'; }
-        else if (metricValue >= 5) { rating = 'Good'; color = '#F59E0B'; }
-        else { rating = 'Poor'; color = '#EF4444'; }
-      } else if (mLower === 'latency') {
-        metricValue = r.latency_ms || 999;
-        if (metricValue < 25) { rating = 'Excellent'; color = '#10B981'; }
-        else if (metricValue < 50) { rating = 'Better'; color = '#06B6D4'; }
-        else if (metricValue < 100) { rating = 'Good'; color = '#F59E0B'; }
-        else { rating = 'Poor'; color = '#EF4444'; }
-      } else {
-        // Coverage / Signal dBm (Default)
-        metricValue = r.signal_dbm != null ? r.signal_dbm : (r.down_mbps && r.down_mbps > 25 ? -82 : -96);
-        if (metricValue >= -85) { rating = 'Excellent'; color = '#10B981'; }
-        else if (metricValue >= -95) { rating = 'Better'; color = '#06B6D4'; }
-        else if (metricValue >= -105) { rating = 'Good'; color = '#F59E0B'; }
-        else { rating = 'Poor'; color = '#EF4444'; }
-      }
+    const rate = (value, excellent, better, good, lowerIsBetter = false) => {
+      const passes = limit => (lowerIsBetter ? value < limit : value >= limit);
+      if (passes(excellent)) return { rating: 'Excellent', color: '#10B981' };
+      if (passes(better)) return { rating: 'Better', color: '#06B6D4' };
+      if (passes(good)) return { rating: 'Good', color: '#F59E0B' };
+      return { rating: 'Poor', color: '#EF4444' };
+    };
 
-      return {
-        id: r.id,
-        lat: r.lat,
-        lng: r.lng,
-        carrier: r.carrier || 'Unknown',
-        radio: r.radio || 'Mobile',
-        down_mbps: r.down_mbps,
-        up_mbps: r.up_mbps,
-        latency_ms: r.latency_ms,
-        signal_dbm: r.signal_dbm,
-        test_type: r.test_type,
-        ts: r.ts,
-        metric: metric,
-        metric_value: metricValue,
-        rating: rating,
-        color: color,
-      };
-    });
+    const formatted = rows
+      .map(r => {
+        let metricValue;
+        let result;
+        if (isDownload) {
+          metricValue = r.down_mbps;
+          result = metricValue != null && rate(metricValue, 50, 25, 10);
+        } else if (isUpload) {
+          metricValue = r.up_mbps;
+          result = metricValue != null && rate(metricValue, 20, 10, 5);
+        } else if (isLatency) {
+          metricValue = r.latency_ms;
+          result = metricValue != null && rate(metricValue, 25, 50, 100, true);
+        } else {
+          metricValue = r.signal_dbm;
+          // Wi-Fi RSSI and cellular signal use different scales
+          result =
+            metricValue != null &&
+            (r.network === 'wifi' ? rate(metricValue, -55, -67, -75) : rate(metricValue, -85, -95, -105));
+        }
+
+        return {
+          id: r.id,
+          lat: r.lat,
+          lng: r.lng,
+          network: r.network,
+          carrier: r.carrier,
+          radio: r.radio,
+          down_mbps: r.down_mbps,
+          up_mbps: r.up_mbps,
+          latency_ms: r.latency_ms,
+          signal_dbm: r.signal_dbm,
+          test_type: r.test_type,
+          ts: r.ts,
+          metric: metric,
+          metric_value: metricValue,
+          rating: result ? result.rating : 'No signal data',
+          color: result ? result.color : '#94A3B8',
+        };
+      })
+      // A coverage point is still a real location with service info; a speed map
+      // only shows points where that speed was measured.
+      .filter(p => isCoverage || p.metric_value != null);
 
     return res.json(formatted);
   } catch (err) {
@@ -422,7 +429,7 @@ app.get('/v1/admin/stats', async (req, res) => {
       avg_down_mbps: totalRows[0]?.avg_down || 0,
       avg_up_mbps: totalRows[0]?.avg_up || 0,
       avg_latency_ms: totalRows[0]?.avg_lat || 0,
-      top_carrier: topCarrierRows[0]?.carrier || 'Airtel',
+      top_carrier: topCarrierRows[0]?.carrier || null,
     });
   } catch (err) {
     console.error('[Admin Stats Error]:', err.message);

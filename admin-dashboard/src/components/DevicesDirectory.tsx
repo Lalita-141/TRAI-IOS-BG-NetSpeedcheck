@@ -79,8 +79,8 @@ export const DevicesDirectory: React.FC<DevicesDirectoryProps> = ({
                     <td style={{ fontFamily: 'monospace', color: '#60A5FA', fontWeight: 600 }}>
                       {d.device_id}
                     </td>
-                    <td>{d.device_model || 'Apple iPhone'}</td>
-                    <td>{d.os_platform || 'iOS 18'}</td>
+                    <td>{d.device_model || '--'}</td>
+                    <td>{d.os_platform || '--'}</td>
                     <td>
                       <b>{d.carrier || '--'}</b>
                     </td>

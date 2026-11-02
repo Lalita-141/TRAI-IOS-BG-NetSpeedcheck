@@ -1,93 +1,26 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
   SafeAreaView,
-  Dimensions,
 } from 'react-native';
-import { WebView } from 'react-native-webview';
-import Svg, {
-  Path,
-  Defs,
-  LinearGradient,
-  Stop,
-  Line as SvgLine,
-} from 'react-native-svg';
 import {
   BackArrowIcon,
   VideoBrowserTestIcon,
   GlobeIcon,
 } from './Icons';
-import { getConfig } from '../config';
+import { useBackgroundKeepAlive } from '../services/backgroundKeepAlive';
+import { VideoBrowserTestResults, runVideoBrowserTest } from '../services/singleTests';
+import { Sample } from '../types';
 
-const VIDEO_HTML = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body {
-      width: 100%;
-      height: 100%;
-      background: #0B1120;
-      overflow: hidden;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    video {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      display: block;
-    }
-  </style>
-</head>
-<body>
-  <video
-    id="player"
-    autoplay
-    loop
-    muted
-    playsinline
-    webkit-playsinline
-    preload="auto"
-  >
-    <source src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4" type="video/mp4">
-    <source src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/friday.mp4" type="video/mp4">
-  </video>
-  <script>
-    var player = document.getElementById('player');
-    if (player) {
-      player.play().catch(function() {
-        document.body.addEventListener('click', function() {
-          player.play();
-        }, { once: true });
-      });
-    }
-  </script>
-</body>
-</html>
-`;
-
-export interface VideoBrowserTestResults {
-  videoDelayMs: number;
-  webDelayMs: number;
-  streamingQuality: string;
-  bufferingRate: string;
-  ttfbMs: number;
-  pageLoadSec: number;
-}
+export type { VideoBrowserTestResults };
 
 interface VideoBrowserTestProgressViewProps {
   onCancel: () => void;
-  onComplete: (results: VideoBrowserTestResults) => void;
+  onComplete: (results: VideoBrowserTestResults, sample: Sample | null) => void;
 }
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export const VideoBrowserTestProgressView: React.FC<VideoBrowserTestProgressViewProps> = ({
   onCancel,
@@ -95,10 +28,10 @@ export const VideoBrowserTestProgressView: React.FC<VideoBrowserTestProgressView
 }) => {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [phase, setPhase] = useState<'video' | 'web' | 'done'>('video');
-  const [videoDelayMs, setVideoDelayMs] = useState<number | null>(null);
-  const [webDelayMs, setWebDelayMs] = useState<number | null>(null);
-  const [currentSpeed, setCurrentSpeed] = useState<number>(0);
-  const [historyPoints, setHistoryPoints] = useState<number[]>([1.2, 1.1, 1.8, 1.4, 6.9, 1.2]);
+  const [measured, setMeasured] = useState<Partial<VideoBrowserTestResults>>({});
+
+  // The test keeps running if the screen turns off
+  useBackgroundKeepAlive('video-browser-test');
 
   // Elapsed seconds timer
   useEffect(() => {
@@ -108,149 +41,46 @@ export const VideoBrowserTestProgressView: React.FC<VideoBrowserTestProgressView
     return () => clearInterval(timer);
   }, []);
 
-  // Execution sequence
-  const completedRef = useRef(false);
+  // Runs once: a re-render of the parent must not start the measurement again
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
   useEffect(() => {
     let isMounted = true;
 
-    const runSequence = async () => {
-      // Phase 1: Video Delay test (approx 3.5s)
-      setPhase('video');
-      setCurrentSpeed(2.4);
-
-      let videoStartupDelay = 120;
-      let webPageDelay = 180;
-      let measuredTtfb = 45;
-
-      try {
-        const config = await getConfig();
-        const serverUrl = config.serverUrl.replace(/\/+$/, '');
-
-        // 1. Probe Video Buffer Delay from server /test-video
-        const vStart = Date.now();
-        const cVideo = new AbortController();
-        const tVideo = setTimeout(() => cVideo.abort(), 4000);
-        const resVideo = await fetch(`${serverUrl}/test-video`, {
-          signal: cVideo.signal,
-          headers: { 'Cache-Control': 'no-cache' },
-        });
-        clearTimeout(tVideo);
-        if (resVideo.ok) {
-          videoStartupDelay = Date.now() - vStart;
+    runVideoBrowserTest((nextPhase, partial) => {
+      if (!isMounted) return;
+      setPhase(nextPhase);
+      setMeasured(partial);
+    })
+      .then(({ results, sample }) => {
+        if (!isMounted) return;
+        setPhase('done');
+        onCompleteRef.current(results, sample);
+      })
+      .catch(err => {
+        console.warn('Video & browser test failed:', err);
+        if (isMounted) {
+          onCompleteRef.current(
+            {
+              videoDelayMs: null,
+              videoMbps: null,
+              streamingQuality: null,
+              webDelayMs: null,
+              ttfbMs: null,
+              pageLoadSec: null,
+              error: err?.message || 'Test failed',
+            },
+            null
+          );
         }
-      } catch {
-        // Fallback to media/ping benchmark
-        const t0 = Date.now();
-        try {
-          const c1 = new AbortController();
-          const t1 = setTimeout(() => c1.abort(), 3000);
-          await fetch('https://www.cloudflare.com/cdn-cgi/trace', {
-            signal: c1.signal,
-            headers: { 'Cache-Control': 'no-cache' },
-          });
-          clearTimeout(t1);
-        } catch {
-          // ignore
-        }
-        videoStartupDelay = Math.max(Date.now() - t0, 60) * 1.5;
-      }
-
-      // Visual speed animation for video chunk download
-      await new Promise(resolve => setTimeout(() => resolve(undefined), 1000));
-      if (!isMounted) return;
-      setCurrentSpeed(6.9);
-      setHistoryPoints(prev => [...prev, 6.9]);
-
-      await new Promise(resolve => setTimeout(() => resolve(undefined), 1000));
-      if (!isMounted) return;
-      const vDelay = Math.round(videoStartupDelay);
-      setVideoDelayMs(vDelay);
-      setCurrentSpeed(1.5);
-      setHistoryPoints(prev => [...prev, 1.5]);
-
-      // Phase 2: Web Delay test (approx 3s)
-      setPhase('web');
-      try {
-        const config = await getConfig();
-        const serverUrl = config.serverUrl.replace(/\/+$/, '');
-
-        // 2. Probe Web Page Latency & TTFB from server /test-webpage
-        const wStart = Date.now();
-        const cWeb = new AbortController();
-        const tWeb = setTimeout(() => cWeb.abort(), 4000);
-        const resWeb = await fetch(`${serverUrl}/test-webpage`, {
-          signal: cWeb.signal,
-          headers: { 'Cache-Control': 'no-cache' },
-        });
-        clearTimeout(tWeb);
-        if (resWeb.ok) {
-          webPageDelay = Date.now() - wStart;
-          measuredTtfb = Math.round(webPageDelay * 0.45);
-        }
-      } catch {
-        webPageDelay = Math.round(vDelay * 1.25);
-        measuredTtfb = Math.round(webPageDelay * 0.4);
-      }
-
-      await new Promise(resolve => setTimeout(() => resolve(undefined), 800));
-      if (!isMounted) return;
-      setCurrentSpeed(8.4);
-      setHistoryPoints(prev => [...prev, 8.4]);
-
-      await new Promise(resolve => setTimeout(() => resolve(undefined), 1200));
-      if (!isMounted) return;
-      const wDelay = Math.round(webPageDelay);
-      setWebDelayMs(wDelay);
-      setCurrentSpeed(2.1);
-      setHistoryPoints(prev => [...prev, 2.1]);
-
-      await new Promise(resolve => setTimeout(() => resolve(undefined), 600));
-      if (!isMounted || completedRef.current) return;
-      completedRef.current = true;
-      setPhase('done');
-
-      onComplete({
-        videoDelayMs: vDelay,
-        webDelayMs: wDelay,
-        streamingQuality: vDelay < 150 ? '4K Ultra HD' : vDelay < 300 ? '1080p Full HD' : '720p HD',
-        bufferingRate: vDelay < 250 ? '0% (Smooth)' : '1.2% (Minor)',
-        ttfbMs: measuredTtfb,
-        pageLoadSec: parseFloat((wDelay / 1000).toFixed(2)),
       });
-    };
-
-    runSequence();
 
     return () => {
       isMounted = false;
     };
-  }, [onComplete]);
+  }, []);
 
-  // Graph params
-  const graphWidth = SCREEN_WIDTH - 32;
-  const graphHeight = 210;
-  const graphPath = useMemo(() => {
-    if (historyPoints.length < 2) {
-      return `M 0 ${graphHeight - 15} L ${graphWidth} ${graphHeight - 15}`;
-    }
-    const maxVal = Math.max(...historyPoints, 10);
-    const stepX = graphWidth / (historyPoints.length - 1);
-
-    const points = historyPoints.map((val, idx) => {
-      const x = idx * stepX;
-      const y = graphHeight - 20 - (val / maxVal) * (graphHeight - 50);
-      return { x, y };
-    });
-
-    let d = `M ${points[0].x} ${points[0].y}`;
-    for (let i = 1; i < points.length; i++) {
-      const prev = points[i - 1];
-      const curr = points[i];
-      const cx = (prev.x + curr.x) / 2;
-      d += ` C ${cx} ${prev.y}, ${cx} ${curr.y}, ${curr.x} ${curr.y}`;
-    }
-    return d;
-  }, [historyPoints, graphWidth]);
+  const statusText = phase === 'video' ? 'Measuring video stream' : 'Measuring web page load';
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -263,7 +93,7 @@ export const VideoBrowserTestProgressView: React.FC<VideoBrowserTestProgressView
         <View style={styles.headerRightSpacer} />
       </View>
 
-      {/* Stepper Bar: Video Delay -> Web Delay (Matching Screenshot) */}
+      {/* Stepper Bar: Video Delay -> Web Delay */}
       <View style={styles.stepperContainer}>
         {/* Connecting Progress Line */}
         <View style={styles.stepperLineTrack}>
@@ -291,7 +121,11 @@ export const VideoBrowserTestProgressView: React.FC<VideoBrowserTestProgressView
           </View>
           <Text style={styles.stepLabel}>Video Delay</Text>
           <Text style={styles.stepValue}>
-            {videoDelayMs != null ? `${videoDelayMs} ms` : 'Testing...'}
+            {measured.videoDelayMs != null
+              ? `${measured.videoDelayMs} ms`
+              : phase === 'video'
+              ? 'Testing...'
+              : '--'}
           </Text>
         </View>
 
@@ -312,48 +146,31 @@ export const VideoBrowserTestProgressView: React.FC<VideoBrowserTestProgressView
             />
           </View>
           <Text style={styles.stepLabel}>Web Delay</Text>
-          <Text style={styles.stepValue}>
-            {webDelayMs != null ? `${webDelayMs} ms` : phase === 'web' ? 'Testing...' : '--'}
-          </Text>
+          <Text style={styles.stepValue}>{phase === 'web' ? 'Testing...' : '--'}</Text>
         </View>
       </View>
 
-      {/* Center 16:9 Video & Web Viewport Card */}
+      {/* Center Status Card */}
       <View style={styles.viewportContainer}>
         <View style={styles.videoCard}>
-          {/* Top Status Bar of Player */}
           <View style={styles.playerTopBar}>
             <View style={styles.qualityPill}>
               <View style={styles.qualityDot} />
-              <Text style={styles.qualityText}>
-                {phase === 'video' ? 'Streaming 1080p HD' : 'Rendering Web Assets'}
-              </Text>
+              <Text style={styles.qualityText}>{statusText}</Text>
             </View>
-            <Text style={styles.bufferText}>
-              {phase === 'video' ? 'Simulating Buffer...' : 'Evaluating TTFB...'}
-            </Text>
           </View>
 
-          {/* Video Player Viewport */}
           <View style={styles.videoViewport}>
-            <WebView
-              originWhitelist={['*']}
-              source={{ html: VIDEO_HTML }}
-              style={styles.videoWebView}
-              allowsInlineMediaPlayback={true}
-              mediaPlaybackRequiresUserAction={false}
-              javaScriptEnabled={true}
-              domStorageEnabled={true}
-              scrollEnabled={false}
-              bounces={false}
-              automaticallyAdjustContentInsets={false}
-            />
-            <View style={styles.videoWatermark}>
-              <Text style={styles.videoWatermarkText}>MySpeed Live</Text>
+            <View style={styles.viewportStatus}>
+              {phase === 'video' ? (
+                <VideoBrowserTestIcon size={40} color="#FFFFFF" />
+              ) : (
+                <GlobeIcon size={40} color="#FFFFFF" />
+              )}
+              <Text style={styles.viewportStatusText}>{statusText}...</Text>
             </View>
           </View>
 
-          {/* Simulated Video Playback Scrubber Bar at bottom of player */}
           <View style={styles.playerScrubberTrack}>
             <View
               style={[
@@ -365,55 +182,15 @@ export const VideoBrowserTestProgressView: React.FC<VideoBrowserTestProgressView
         </View>
       </View>
 
-      {/* Bottom Real-time Speed Graph */}
+      {/* Bottom: real elapsed time and measured throughput */}
       <View style={styles.graphContainer}>
         <View style={styles.graphHeader}>
           <Text style={styles.graphTimeSpent}>
             Time spent <Text style={styles.graphTimeBold}>{elapsedSeconds} s</Text>
           </Text>
           <Text style={styles.graphCurrentSpeed}>
-            {currentSpeed > 0 ? currentSpeed.toFixed(2) : '0.00'} Mbps
+            {measured.videoMbps != null ? `${measured.videoMbps.toFixed(2)} Mbps` : '-- Mbps'}
           </Text>
-        </View>
-
-        <View style={styles.graphCard}>
-          <Svg width={graphWidth} height={graphHeight}>
-            <Defs>
-              <LinearGradient id="graphFill" x1="0%" y1="0%" x2="0%" y2="100%">
-                <Stop offset="0%" stopColor="#00A389" stopOpacity="0.25" />
-                <Stop offset="100%" stopColor="#00A389" stopOpacity="0.0" />
-              </LinearGradient>
-            </Defs>
-
-            {/* Horizontal Grid Lines */}
-            <SvgLine x1="0" y1="35" x2={graphWidth} y2="35" stroke="#F1F5F9" strokeWidth="1" />
-            <SvgLine x1="0" y1="75" x2={graphWidth} y2="75" stroke="#F1F5F9" strokeWidth="1" />
-            <SvgLine x1="0" y1="115" x2={graphWidth} y2="115" stroke="#F1F5F9" strokeWidth="1" />
-            <SvgLine x1="0" y1="155" x2={graphWidth} y2="155" stroke="#F1F5F9" strokeWidth="1" />
-            <SvgLine x1="0" y1={graphHeight - 15} x2={graphWidth} y2={graphHeight - 15} stroke="#E2E8F0" strokeWidth="1" />
-
-            {/* Vertical Grid Lines */}
-            {[0.25, 0.5, 0.75].map(ratio => (
-              <SvgLine
-                key={ratio}
-                x1={graphWidth * ratio}
-                y1="0"
-                x2={graphWidth * ratio}
-                y2={graphHeight}
-                stroke="#F1F5F9"
-                strokeWidth="1"
-              />
-            ))}
-
-            {/* Line waveform */}
-            <Path
-              d={graphPath}
-              stroke="#00A389"
-              strokeWidth="2.8"
-              fill="none"
-              strokeLinecap="round"
-            />
-          </Svg>
         </View>
       </View>
     </SafeAreaView>
@@ -584,6 +361,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#0B1120',
     position: 'relative',
     overflow: 'hidden',
+  },
+  viewportStatus: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  viewportStatusText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
   },
   videoWebView: {
     flex: 1,

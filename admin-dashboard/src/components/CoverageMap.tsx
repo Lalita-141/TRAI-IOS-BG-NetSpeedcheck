@@ -108,15 +108,15 @@ export const CoverageMap: React.FC<CoverageMapProps> = ({ onPointSelect }) => {
             marker.bindPopup(`
               <div style="font-family: inherit; font-size: 13px; color: #F8FAFC; min-width: 170px;">
                 <div style="font-weight: 800; font-size: 14px; margin-bottom: 6px; color: #60A5FA; display: flex; align-items: center; justify-content: space-between;">
-                  <span>${p.carrier || 'Operator'}</span>
-                  <span style="font-size: 11px; background: rgba(255,255,255,0.1); padding: 1px 6px; border-radius: 4px; color: #94A3B8;">${p.radio || 'Mobile'}</span>
+                  <span>${p.carrier || 'Unknown operator'}</span>
+                  <span style="font-size: 11px; background: rgba(255,255,255,0.1); padding: 1px 6px; border-radius: 4px; color: #94A3B8;">${p.radio || '--'}</span>
                 </div>
                 <div style="margin-bottom: 2px;">Downlink: <b style="color: #10B981;">${p.down_mbps != null ? p.down_mbps.toFixed(1) : '--'} Mbps</b></div>
                 <div style="margin-bottom: 2px;">Uplink: <b style="color: #60A5FA;">${p.up_mbps != null ? p.up_mbps.toFixed(1) : '--'} Mbps</b></div>
                 <div style="margin-bottom: 2px;">Latency: <b>${p.latency_ms != null ? Math.round(p.latency_ms) : '--'} ms</b></div>
                 <div style="margin-bottom: 6px;">Signal: <b>${p.signal_dbm != null ? `${p.signal_dbm} dBm` : 'N/A'}</b></div>
                 <div style="padding: 3px 8px; border-radius: 6px; background: ${p.color}; color: #FFFFFF; font-weight: 700; font-size: 11px; display: inline-block;">
-                  ${p.rating} Performance
+                  ${p.rating === 'No signal data' ? p.rating : `${p.rating} Performance`}
                 </div>
               </div>
             `);

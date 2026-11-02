@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { NativeModules, Platform } from 'react-native';
+import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ContinuousTestConfig } from '../components/ContinuousTestSetupView';
 import type {
   CycleResult,
@@ -14,7 +15,10 @@ import { speedTester } from './speedTester';
 import { locationService } from './locationService';
 import { measureVideoAndWeb, qualityForMbps } from './qosProbes';
 import { testCoordinator, TestOwner } from './testCoordinator';
-import { monitorService } from './monitorService';
+import { backgroundKeepAlive } from './backgroundKeepAlive';
+import { promptForBackgroundLocation } from './locationPermission';
+
+const STORAGE_KEY_SESSION = '@speedmonitor_continuous_session';
 
 export type ContinuousPhase = 'idle' | 'waiting' | 'testing' | 'gap';
 
@@ -36,17 +40,6 @@ export interface ContinuousSessionState {
 }
 
 type SessionListener = (state: ContinuousSessionState) => void;
-
-// Safely resolve BackgroundService if native module is available (Android keep-alive)
-let BackgroundService: any = null;
-try {
-  if (NativeModules && NativeModules.RNBackgroundActions) {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    BackgroundService = require('react-native-background-actions').default;
-  }
-} catch (err) {
-  console.log('Background actions not loaded for continuous test', err);
-}
 
 const KEEP_ALIVE_TAG = 'continuous';
 
@@ -106,8 +99,6 @@ class ContinuousTestService {
   private sessionId = 0;
   private watchId: number | null = null;
   private lastLocation: GeoLocationResult | null = null;
-  private monitorUnsubscribe: (() => void) | null = null;
-  private androidServiceStarting = false;
 
   getState(): ContinuousSessionState {
     return this.state;
@@ -156,9 +147,51 @@ class ContinuousTestService {
     });
 
     locationService.requestPermission().catch(() => {});
-    await this.acquireKeepAlive();
+    promptForBackgroundLocation().catch(() => {});
+    this.acquireKeepAlive();
+    this.persist();
 
     this.loop(sessionId);
+  }
+
+  /**
+   * Picks up a session interrupted by the app being killed. Runs on every launch,
+   * including when iOS relaunches the app in the background.
+   */
+  async restore(): Promise<void> {
+    if (this.state.active) return;
+    let saved: Partial<ContinuousSessionState> | null = null;
+    try {
+      const raw = await AsyncStorage.getItem(STORAGE_KEY_SESSION);
+      saved = raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      console.warn('Failed to load continuous session', e);
+    }
+    if (this.state.active || !saved?.config || !saved.endsAt) return;
+
+    const sessionId = ++this.sessionId;
+    this.setState({
+      ...INITIAL_STATE,
+      ...saved,
+      active: true,
+      phase: 'waiting',
+      liveSecondary: 'Resuming continuous session...',
+    });
+
+    if (Date.now() >= saved.endsAt) {
+      await this.finish(false);
+      return;
+    }
+    this.acquireKeepAlive();
+    this.loop(sessionId);
+  }
+
+  private persist() {
+    const { config, startedAt, endsAt, currentCycle, cycles } = this.state;
+    AsyncStorage.setItem(
+      STORAGE_KEY_SESSION,
+      JSON.stringify({ config, startedAt, endsAt, currentCycle, cycles })
+    ).catch(e => console.warn('Failed to save continuous session', e));
   }
 
   /** Stops the running session (user action). Returns the session results. */
@@ -204,6 +237,7 @@ class ContinuousTestService {
 
         if (outcome) {
           this.setState({ cycles: [outcome.cycle, ...this.state.cycles] });
+          this.persist();
           if (outcome.sample) {
             // Don't block the loop on storage / network
             sampleStore
@@ -248,7 +282,7 @@ class ContinuousTestService {
     return loc;
   }
 
-  private buildBaseSample(deviceId: string, loc: GeoLocationResult): Sample {
+  private buildBaseSample(deviceId: string, loc: GeoLocationResult, testLabel: string | null): Sample {
     return {
       id: generateUUID(),
       device_id: deviceId,
@@ -263,7 +297,7 @@ class ContinuousTestService {
       carrier: null,
       device_model: Platform.OS === 'ios' ? 'Apple iPhone' : 'Android Device',
       os_platform: `${Platform.OS} ${Platform.Version}`,
-      location_type: loc.accuracy && loc.accuracy < 25 ? 'Outdoor' : 'Indoor',
+      location_type: testLabel,
       lat: loc.lat,
       lng: loc.lng,
       accuracy: loc.accuracy,
@@ -286,7 +320,7 @@ class ContinuousTestService {
       const appConfig = await getConfig();
       const deviceId = await getDeviceId();
       const loc = await this.getLocation();
-      const base = this.buildBaseSample(deviceId, loc);
+      const base = this.buildBaseSample(deviceId, loc, appConfig.testLabel ?? null);
 
       if (config.testType === 'speed') {
         const result = await speedTester.runFullTest(appConfig, progress => {
@@ -313,6 +347,7 @@ class ContinuousTestService {
           network: result.networkType,
           radio: result.radioTech,
           carrier: result.carrier,
+          ...result.signal,
         };
         return {
           sample,
@@ -359,6 +394,7 @@ class ContinuousTestService {
           network: net.network,
           radio: net.radio,
           carrier: net.carrier,
+          ...net.signal,
         };
         const gps = loc.accuracy != null ? ` • GPS ±${Math.round(loc.accuracy)}m` : '';
         return {
@@ -407,6 +443,7 @@ class ContinuousTestService {
         network: net.network,
         radio: net.radio,
         carrier: net.carrier,
+        ...net.signal,
         video_delay_ms: probe.videoDelayMs,
         web_delay_ms: probe.pageLoadSec != null ? Math.round(probe.pageLoadSec * 1000) : null,
         page_load_sec: probe.pageLoadSec,
@@ -529,87 +566,31 @@ class ContinuousTestService {
       lastResults: results,
       resultsSeen: false,
     });
-    await this.releaseKeepAlive();
+    AsyncStorage.removeItem(STORAGE_KEY_SESSION).catch(() => {});
+    this.releaseKeepAlive();
     return results;
   }
 
   // --- Background keep-alive (screen off / app in background) ---
 
-  private async acquireKeepAlive() {
-    // iOS: dedicated low-power native location session keeps the JS runtime alive
-    const bridge = NativeModules.NativeMonitorBridge;
-    if (Platform.OS === 'ios' && bridge && typeof bridge.acquireKeepAlive === 'function') {
-      bridge.acquireKeepAlive(KEEP_ALIVE_TAG).catch(() => {});
-    }
+  private acquireKeepAlive() {
+    backgroundKeepAlive.acquire(KEEP_ALIVE_TAG, { relaunchAfterKill: true });
 
-    // Location watch feeds each cycle's coordinates (and keeps Android awake with the service)
+    // Location watch feeds each cycle's coordinates
     if (this.watchId === null) {
       this.watchId = locationService.watchPosition(loc => {
         this.lastLocation = loc;
       });
     }
-
-    // Android: foreground service. Monitor stopping also stops the shared service,
-    // so re-acquire it whenever monitoring turns off mid-session.
-    await this.ensureAndroidService();
-    if (!this.monitorUnsubscribe) {
-      this.monitorUnsubscribe = monitorService.subscribe(status => {
-        if (!status.isRunning && this.state.active) {
-          this.ensureAndroidService();
-        }
-      });
-    }
   }
 
-  private async ensureAndroidService() {
-    if (Platform.OS !== 'android' || !BackgroundService || this.androidServiceStarting) return;
-    if (BackgroundService.isRunning()) return; // already keeping JS alive (monitor or us)
-
-    this.androidServiceStarting = true;
-    try {
-      const keepAliveRunner = async () => {
-        // Stay alive while a continuous session or monitoring needs the service.
-        // Returning lets the library stop the service.
-        while (
-          BackgroundService.isRunning() &&
-          (this.state.active || monitorService.getIsRunning())
-        ) {
-          await sleep(5000);
-        }
-      };
-      await BackgroundService.start(keepAliveRunner, {
-        taskName: 'NetSpeedContinuous',
-        taskTitle: 'Continuous Test Running',
-        taskDesc: 'Measuring network quality in the background',
-        taskIcon: {
-          name: 'ic_launcher',
-          type: 'mipmap',
-        },
-        color: '#06B6D4',
-        linkingURI: 'speedmonitor://',
-      });
-    } catch (e) {
-      console.warn('Continuous BackgroundService.start error:', e);
-    } finally {
-      this.androidServiceStarting = false;
-    }
-  }
-
-  private async releaseKeepAlive() {
-    const bridge = NativeModules.NativeMonitorBridge;
-    if (Platform.OS === 'ios' && bridge && typeof bridge.releaseKeepAlive === 'function') {
-      bridge.releaseKeepAlive(KEEP_ALIVE_TAG).catch(() => {});
-    }
+  private releaseKeepAlive() {
+    backgroundKeepAlive.release(KEEP_ALIVE_TAG);
     if (this.watchId !== null) {
       locationService.clearWatch(this.watchId);
       this.watchId = null;
     }
     this.lastLocation = null;
-    if (this.monitorUnsubscribe) {
-      this.monitorUnsubscribe();
-      this.monitorUnsubscribe = null;
-    }
-    // Android service runner exits by itself once neither feature needs it
   }
 }
 

@@ -11,6 +11,13 @@ import { Sample } from '../types';
 import { VideoBrowserTestResults } from './VideoBrowserTestProgressView';
 import { reverseGeocode } from '../services/geocodeService';
 import {
+  NOT_MEASURED,
+  displayCarrier,
+  displayRadio,
+  displaySignal,
+  useTestServerHost,
+} from '../utils/sampleDisplay';
+import {
   BackArrowIcon,
   CoverageTestIcon,
   SignalBarsIcon,
@@ -33,7 +40,7 @@ interface VideoBrowserTestResultViewProps {
 export const VideoBrowserTestResultView: React.FC<VideoBrowserTestResultViewProps> = ({
   results,
   sample,
-  testId = 10,
+  testId = NOT_MEASURED,
   onBack,
   onRunSpeedTest,
 }) => {
@@ -58,20 +65,16 @@ export const VideoBrowserTestResultView: React.FC<VideoBrowserTestResultViewProp
     hour12: true,
   });
 
-  const videoDelay = results?.videoDelayMs ?? 145;
-  const webDelay = results?.webDelayMs ?? 310;
-  const quality = results?.streamingQuality ?? '1080p Full HD';
-  const bufferRate = results?.bufferingRate ?? '0% (Smooth)';
-  const ttfb = results?.ttfbMs ?? 38;
+  const videoDelay = results?.videoDelayMs ?? NOT_MEASURED;
+  const webDelay = results?.webDelayMs ?? NOT_MEASURED;
+  const quality = results?.streamingQuality ?? NOT_MEASURED;
+  const videoSpeed = results?.videoMbps != null ? `${results.videoMbps} Mbps` : NOT_MEASURED;
+  const ttfb = results?.ttfbMs ?? NOT_MEASURED;
 
-  const carrier = sample?.carrier && sample.carrier !== '--' ? sample.carrier : 'Jio';
-  const radio = sample?.radio || (sample?.network === 'wifi' ? 'Wi-Fi' : '4G');
-  const coverageDbm = sample?.network === 'wifi' ? '-58 dBm' : '-101 dBm';
-
-  const serverDisplay =
-    carrier === 'Wi-Fi'
-      ? 'TRAI Broadband Video CDN - Mumbai'
-      : `${carrier.toUpperCase()} - Streaming Cache Server`;
+  const carrier = displayCarrier(sample);
+  const radio = displayRadio(sample);
+  const coverage = displaySignal(sample);
+  const serverDisplay = useTestServerHost();
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -90,6 +93,7 @@ export const VideoBrowserTestResultView: React.FC<VideoBrowserTestResultViewProp
         showsVerticalScrollIndicator={false}>
         {/* Top Hero QoS Card */}
         <View style={styles.heroCard}>
+          {results?.error ? <Text style={styles.heroMetricLabel}>Test failed: {results.error}</Text> : null}
           <View style={styles.heroTopRow}>
             {/* Video Delay */}
             <View style={styles.heroSpeedCol}>
@@ -130,8 +134,8 @@ export const VideoBrowserTestResultView: React.FC<VideoBrowserTestResultViewProp
             <View style={styles.metricDivider} />
 
             <View style={styles.heroMetricCol}>
-              <Text style={styles.heroMetricLabel}>Buffering Rate</Text>
-              <Text style={styles.heroMetricValue}>{bufferRate}</Text>
+              <Text style={styles.heroMetricLabel}>Video Speed</Text>
+              <Text style={styles.heroMetricValue}>{videoSpeed}</Text>
             </View>
 
             <View style={styles.metricDivider} />
@@ -155,7 +159,7 @@ export const VideoBrowserTestResultView: React.FC<VideoBrowserTestResultViewProp
                 <CoverageTestIcon size={15} color="#64748B" />
                 <Text style={styles.detailFieldLabel}>Coverage</Text>
               </View>
-              <Text style={styles.detailFieldValue}>{coverageDbm}</Text>
+              <Text style={styles.detailFieldValue}>{coverage}</Text>
             </View>
 
             <View style={styles.detailCol}>

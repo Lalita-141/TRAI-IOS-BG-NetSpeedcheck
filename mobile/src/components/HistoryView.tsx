@@ -171,28 +171,16 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
   // Aggregate statistics dynamically computed from filtered results
   const summary = useMemo(() => {
-    if (filteredSamples.length === 0) {
-      return { total: 0, avgDown: 0, avgUp: 0, avgPing: 0 };
-    }
-    let sumDown = 0;
-    let sumUp = 0;
-    let sumPing = 0;
-    let pingCount = 0;
-
-    filteredSamples.forEach(s => {
-      if (s.down_mbps != null) sumDown += s.down_mbps;
-      if (s.up_mbps != null) sumUp += s.up_mbps;
-      if (s.latency_ms != null) {
-        sumPing += s.latency_ms;
-        pingCount++;
-      }
-    });
-
+    // Average only tests that measured the value: a coverage test has no speed
+    const average = (values: (number | null | undefined)[]) => {
+      const nums = values.filter((v): v is number => v != null);
+      return nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+    };
     return {
       total: filteredSamples.length,
-      avgDown: parseFloat((sumDown / filteredSamples.length).toFixed(1)),
-      avgUp: parseFloat((sumUp / filteredSamples.length).toFixed(1)),
-      avgPing: pingCount > 0 ? Math.round(sumPing / pingCount) : 0,
+      avgDown: parseFloat(average(filteredSamples.map(s => s.down_mbps)).toFixed(1)),
+      avgUp: parseFloat(average(filteredSamples.map(s => s.up_mbps)).toFixed(1)),
+      avgPing: Math.round(average(filteredSamples.map(s => s.latency_ms))),
     };
   }, [filteredSamples]);
 
@@ -222,34 +210,14 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     return { lat: 18.5204, lng: 73.8567 };
   }, [currentLocation, samples]);
 
-  // Transform filtered samples into map markers with valid coordinates
+  // Map markers: only tests with a real GPS position are drawn
   const mapMarkersData = useMemo(() => {
-    const centerLat = defaultCenter.lat;
-    const centerLng = defaultCenter.lng;
-
-    return filteredSamples.map((s, idx) => {
-      let lat = s.lat;
-      let lng = s.lng;
-      const isSimulated = lat == null || lng == null;
-
-      if (lat == null || lng == null) {
-        // Deterministic hash offset around center for tests without GPS
-        const str = s.id || `${s.ts}_${idx}`;
-        let hash = 0;
-        for (let i = 0; i < str.length; i++) {
-          hash = (hash * 31 + str.charCodeAt(i)) % 1000000;
-        }
-        const absHash = Math.abs(hash);
-        const r = 0.007 + (absHash % 45) * 0.0006;
-        const theta = ((absHash % 360) * Math.PI) / 180;
-        lat = centerLat + r * Math.sin(theta);
-        lng = centerLng + (r / Math.cos((centerLat * Math.PI) / 180)) * Math.cos(theta);
-      }
-
-      const down = s.down_mbps || 0;
-      const up = s.up_mbps || 0;
-      const ping = s.latency_ms || 0;
-      const jitter = s.jitter_ms || 0;
+    return filteredSamples.filter(s => s.lat != null && s.lng != null).map(s => {
+      const { lat, lng } = s;
+      const down = s.down_mbps;
+      const up = s.up_mbps;
+      const ping = s.latency_ms;
+      const jitter = s.jitter_ms;
       const testType = (s.test_type || 'speed').toUpperCase();
       const carrier =
         s.carrier && s.carrier !== '--' && s.carrier !== 'wifi'
@@ -262,7 +230,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       const timeStr = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
 
       let color = '#EF4444';
-      if (down >= 50) color = '#10B981';
+      if (down == null) color = '#94A3B8';
+      else if (down >= 50) color = '#10B981';
       else if (down >= 25) color = '#00A389';
       else if (down >= 10) color = '#F59E0B';
 
@@ -279,10 +248,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         network: s.network === 'wifi' ? 'Wi-Fi' : s.radio || 'Mobile Data',
         timeStr,
         color,
-        isSimulated,
       };
     });
-  }, [filteredSamples, defaultCenter]);
+  }, [filteredSamples]);
 
   // Synchronize markers to WebView when filters change
   useEffect(() => {
@@ -480,7 +448,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     var markerGroup = L.featureGroup().addTo(map);
 
     function createMarkerIcon(m) {
-      var speedText = m.down > 0 ? (m.down >= 100 ? Math.round(m.down) : m.down.toFixed(1)) : '0';
+      var speedText = m.down == null ? '--' : (m.down >= 100 ? Math.round(m.down) : m.down.toFixed(1));
       var html = '<div class="speed-pin-wrap">' +
                    '<div class="speed-pin-circle" style="background-color:' + m.color + ';">' + speedText + '</div>' +
                    '<div class="speed-pin-beak" style="border-top:6px solid ' + m.color + ';"></div>' +
@@ -492,6 +460,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         iconAnchor: [16, 38],
         popupAnchor: [0, -36]
       });
+    }
+
+    function fmt(value, digits) {
+      return value == null ? '--' : value.toFixed(digits);
     }
 
     function createPopupHtml(m) {
@@ -507,10 +479,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                '</div>' +
                '<div class="h-pop-carrier">' + m.carrier + ' &bull; ' + m.network + '</div>' +
                '<div class="h-pop-metrics">' +
-                 '<div class="h-m-item"><span class="h-m-label">&#8595; Download</span><span class="h-m-val" style="color:' + m.color + ';">' + m.down.toFixed(1) + ' Mbps</span></div>' +
-                 '<div class="h-m-item"><span class="h-m-label">&#8593; Upload</span><span class="h-m-val">' + m.up.toFixed(1) + ' Mbps</span></div>' +
-                 '<div class="h-m-item"><span class="h-m-label">&#9201; Ping</span><span class="h-m-val">' + Math.round(m.ping) + ' ms</span></div>' +
-                 '<div class="h-m-item"><span class="h-m-label">&#12336; Jitter</span><span class="h-m-val">' + m.jitter.toFixed(1) + ' ms</span></div>' +
+                 '<div class="h-m-item"><span class="h-m-label">&#8595; Download</span><span class="h-m-val" style="color:' + m.color + ';">' + fmt(m.down, 1) + ' Mbps</span></div>' +
+                 '<div class="h-m-item"><span class="h-m-label">&#8593; Upload</span><span class="h-m-val">' + fmt(m.up, 1) + ' Mbps</span></div>' +
+                 '<div class="h-m-item"><span class="h-m-label">&#9201; Ping</span><span class="h-m-val">' + fmt(m.ping, 0) + ' ms</span></div>' +
+                 '<div class="h-m-item"><span class="h-m-label">&#12336; Jitter</span><span class="h-m-val">' + fmt(m.jitter, 1) + ' ms</span></div>' +
                '</div>' +
                '<button onclick="selectMarkerSample(&apos;' + m.id + '&apos;)" style="margin-top:8px;width:100%;padding:6px;background:#00A389;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;">View Details &rarr;</button>' +
              '</div>';

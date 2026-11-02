@@ -11,6 +11,49 @@ export interface SpeedResult {
   networkType: string;
   radioTech: string | null;
   carrier: string | null;
+  signal: SignalInfo;
+}
+
+// Field names match Sample so they can be spread into it
+export interface SignalInfo {
+  signal_dbm: number | null;
+  signal_quality: string | null;
+  cell_tower: string | null;
+  frequency_band: string | null;
+}
+
+export const NO_SIGNAL: SignalInfo = {
+  signal_dbm: null,
+  signal_quality: null,
+  cell_tower: null,
+  frequency_band: null,
+};
+
+/** Rating of a measured signal. Same thresholds as the server's map. */
+export function rateSignal(dbm: number, network: string | null): string {
+  const [excellent, better, good] = network === 'wifi' ? [-55, -67, -75] : [-85, -95, -105];
+  if (dbm >= excellent) return 'Excellent';
+  if (dbm >= better) return 'Better';
+  if (dbm >= good) return 'Good';
+  return 'Poor';
+}
+
+function toSignalInfo(info: any, network: string): SignalInfo {
+  const dbm = typeof info?.signalDbm === 'number' ? info.signalDbm : null;
+  return {
+    signal_dbm: dbm,
+    signal_quality: dbm != null ? rateSignal(dbm, network) : null,
+    cell_tower: info?.cellTower ?? null,
+    frequency_band: info?.frequencyBand ?? null,
+  };
+}
+
+// A native radio query must never hold up a test
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([
+    promise,
+    new Promise<null>(resolve => setTimeout(() => resolve(null), ms)),
+  ]);
 }
 
 let cachedIsp: { isp: string; timestamp: number } | null = null;
@@ -155,7 +198,10 @@ export class SpeedTester {
       }
 
       const blob = await res.blob();
-      const bytes = blob.size || mb * 1024 * 1024;
+      const bytes = blob.size;
+      if (!bytes) {
+        return null;
+      }
       const durationSec = Math.max((Date.now() - start) / 1000, 0.001);
       const mbps = (bytes * 8) / 1_000_000 / durationSec;
       return parseFloat(mbps.toFixed(2));
@@ -210,11 +256,13 @@ export class SpeedTester {
     radio: string | null;
     carrier: string | null;
     isConnected: boolean;
+    signal: SignalInfo;
   }> {
     let network = 'other';
     let radio: string | null = null;
     let carrier: string | null = null;
     let isConnected = true;
+    let signal = NO_SIGNAL;
 
     try {
       // 1. Query NetInfo for active connection interface type
@@ -227,18 +275,22 @@ export class SpeedTester {
         network = 'wifi';
         radio = 'Wi-Fi';
         // Resolve ISP / Provider of the active Wi-Fi or Hotspot gateway (bypass internal SIM)
-        const isp = await resolvePublicISP(true);
-        carrier = isp || 'Wi-Fi';
+        carrier = await resolvePublicISP(true);
+        if (NativeModules.TelephonyModule?.getWifiInfo) {
+          const wifiInfo = await withTimeout(NativeModules.TelephonyModule.getWifiInfo(), 3000).catch(() => null);
+          signal = toSignalInfo(wifiInfo, network);
+        }
       } else if (state.type === NetInfoStateType.cellular) {
         network = 'cellular';
 
         // Query Native Telephony Module (iOS CoreTelephony SIM)
         if (NativeModules.TelephonyModule && NativeModules.TelephonyModule.getCellularInfo) {
           try {
-            const telInfo = await NativeModules.TelephonyModule.getCellularInfo();
+            const telInfo: any = await withTimeout(NativeModules.TelephonyModule.getCellularInfo(), 3000);
             if (telInfo) {
               if (telInfo.carrier && telInfo.carrier !== '--') carrier = telInfo.carrier;
               if (telInfo.radio) radio = telInfo.radio;
+              signal = toSignalInfo(telInfo, network);
             }
           } catch (telErr) {
             console.warn('Native TelephonyModule query failed:', telErr);
@@ -253,14 +305,12 @@ export class SpeedTester {
           radio = details.cellularGeneration.toUpperCase();
         }
         if (!carrier || carrier === '--') {
-          const isp = await resolvePublicISP(true);
-          carrier = isp || (radio ? `${radio} Mobile` : 'Cellular');
+          carrier = await resolvePublicISP(true);
         }
       } else if (state.type === NetInfoStateType.ethernet) {
         network = 'ethernet';
         radio = 'Ethernet';
-        const isp = await resolvePublicISP(true);
-        carrier = isp || 'LAN / Ethernet';
+        carrier = await resolvePublicISP(true);
       }
     } catch (e) {
       console.warn('Failed to get network state:', e);
@@ -268,9 +318,10 @@ export class SpeedTester {
 
     return {
       network,
-      radio: radio || (network === 'wifi' ? 'Wi-Fi' : 'Cellular'),
-      carrier: carrier && carrier !== '--' ? carrier : (network === 'wifi' ? 'Wi-Fi' : 'Cellular'),
+      radio,
+      carrier: carrier && carrier !== '--' ? carrier : null,
       isConnected,
+      signal,
     };
   }
 
@@ -347,6 +398,7 @@ export class SpeedTester {
       networkType: netContext.network,
       radioTech: netContext.radio,
       carrier: netContext.carrier,
+      signal: netContext.signal,
     };
   }
 }
