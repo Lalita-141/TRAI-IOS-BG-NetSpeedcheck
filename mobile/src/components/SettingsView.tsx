@@ -13,6 +13,7 @@ import {
   Modal,
   TextInput,
   Platform,
+  Image,
 } from 'react-native';
 import { AppConfig } from '../types';
 import { getConfig, saveConfig, getDeviceId } from '../config';
@@ -623,6 +624,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
           </Text>
         </TouchableOpacity>
         <Text style={styles.uuidHintText}>{t('tap_to_copy_uuid', 'Tap UUID to share or copy')}</Text>
+
+        {/* Company branding */}
+        <View style={styles.brandDivider} />
+        <Text style={styles.developedByText}>{t('developed_by', 'Developed by')}</Text>
+        <Image
+          source={require('../assets/splash-logo.png')}
+          style={styles.brandLogo}
+          accessibilityLabel="Hare & Turtle AI Solutions"
+        />
+        <Text style={styles.companyText}>HARE AND TURTLE AI SOLUTIONS PRIVATE LIMITED</Text>
       </View>
 
       {/* ================= MODALS ================= */}
@@ -1175,6 +1186,32 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#94A3B8',
     marginTop: 4,
+  },
+  brandDivider: {
+    width: 48,
+    height: 1,
+    backgroundColor: '#E2E8F0',
+    marginTop: 20,
+    marginBottom: 16,
+  },
+  developedByText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#94A3B8',
+    marginBottom: 10,
+  },
+  brandLogo: {
+    width: 200,
+    height: 40,
+    resizeMode: 'contain',
+  },
+  companyText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#64748B',
+    letterSpacing: 0.4,
+    marginTop: 10,
+    textAlign: 'center',
   },
 
   /* Modals */

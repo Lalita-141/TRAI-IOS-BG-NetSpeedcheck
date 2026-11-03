@@ -56,4 +56,11 @@ class ReactNativeDelegate: RCTDefaultReactNativeFactoryDelegate {
     Bundle.main.url(forResource: "main", withExtension: "jsbundle")
 #endif
   }
+
+  // Keep the launch screen up until JS has rendered, so no blank view shows in between
+  override func customize(_ rootView: RCTRootView) {
+    let launchScreen = UIStoryboard(name: "LaunchScreen", bundle: nil).instantiateInitialViewController()
+    rootView.loadingView = launchScreen?.view
+    rootView.backgroundColor = launchScreen?.view.backgroundColor
+  }
 }

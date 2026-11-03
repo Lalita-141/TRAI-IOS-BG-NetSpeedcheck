@@ -25,6 +25,7 @@ import { SpeedDashboardView } from './src/components/SpeedDashboardView';
 import { CoverageMapView } from './src/components/CoverageMapView';
 import { HistoryView } from './src/components/HistoryView';
 import { SettingsView } from './src/components/SettingsView';
+import { SplashScreen } from './src/components/SplashScreen';
 import {
   CloudCheckIcon,
   CloudUploadIcon,
@@ -366,6 +367,7 @@ export default function App() {
   return (
     <LanguageProvider>
       <AppContent />
+      <SplashScreen />
     </LanguageProvider>
   );
 }
