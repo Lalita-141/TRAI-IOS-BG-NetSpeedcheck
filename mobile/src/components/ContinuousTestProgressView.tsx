@@ -19,6 +19,7 @@ import {
 } from './Icons';
 import { ContinuousTestConfig, ContinuousTestType } from './ContinuousTestSetupView';
 import { MonitorStatus } from '../services/monitorService';
+import { Sample } from '../types';
 import {
   continuousTestService,
   useContinuousSession,
@@ -43,6 +44,8 @@ export interface CycleResult {
     carrier?: string | null;
     radio?: string | null;
   };
+  // Everything this cycle measured (null when the cycle failed); missing on sessions saved by older versions
+  sample?: Sample | null;
 }
 
 export interface ContinuousTestSessionResults {

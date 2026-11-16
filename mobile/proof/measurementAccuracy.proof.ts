@@ -36,20 +36,125 @@ let server: any;
 let proxy: any;
 const rows: string[] = [];
 
-/** Sends a body at exactly link.mbps. */
-async function writePaced(res: any, body: any) {
+// All connections share one simulated link, so 4 parallel transfers split link.mbps between them
+let linkFreeAt = 0;
+// Bumped for every test, so data an earlier test left in socket buffers never uses this test's link
+let generation = 0;
+async function throughLink(bytes: number) {
   const bytesPerMs = (link.mbps * 1_000_000) / 8 / 1000;
-  const start = Date.now();
-  let sent = 0;
-  while (sent < body.length) {
-    const target = Math.min(body.length, Math.floor((Date.now() - start) * bytesPerMs));
-    if (target > sent) {
-      res.write(body.subarray(sent, target));
-      sent = target;
-    }
-    await sleep(2);
+  linkFreeAt = Math.max(linkFreeAt, Date.now()) + bytes / bytesPerMs;
+  const wait = linkFreeAt - Date.now();
+  if (wait > 0) await sleep(wait);
+}
+
+const PIECE = 64 * 1024;
+
+/** Sends a body at exactly link.mbps, stopping if the client goes away. */
+async function writePaced(res: any, body: any, gen: number) {
+  for (let sent = 0; sent < body.length && !res.destroyed && gen === generation; sent += PIECE) {
+    const piece = body.subarray(sent, sent + PIECE);
+    await throughLink(piece.length);
+    if (!res.destroyed) res.write(piece);
   }
-  res.end();
+  if (!res.destroyed) res.end();
+}
+
+/**
+ * Minimal XMLHttpRequest for Node, so the proof runs the same XHR code the phone runs.
+ * Progress is reported as data arrives (download) or is handed to the socket (upload), like iOS.
+ */
+class NodeXHR {
+  readyState = 0;
+  status = 0;
+  response: any = null;
+  responseType = '';
+  timeout = 0;
+  onreadystatechange: any = null;
+  onprogress: any = null;
+  onload: any = null;
+  onerror: any = null;
+  ontimeout: any = null;
+  upload: any = { onprogress: null };
+  private method = 'GET';
+  private url = '';
+  private headers: any = {};
+  private req: any = null;
+  private finished = false;
+
+  open(method: string, url: string) {
+    this.method = method;
+    this.url = url;
+  }
+  setRequestHeader(name: string, value: string) {
+    this.headers[name] = value;
+  }
+  abort() {
+    this.finished = true;
+    this.req?.destroy();
+  }
+  private fail(handler: any) {
+    if (this.finished) return;
+    this.finished = true;
+    handler?.();
+  }
+  send(body?: any) {
+    const u = new URL(this.url);
+    const data = body == null ? null : Buffer.from(body);
+    const headers = { ...this.headers, ...(data ? { 'Content-Length': data.length } : {}) };
+    const req = http.request(
+      { hostname: u.hostname, port: u.port, path: u.pathname + u.search, method: this.method, headers },
+      (res: any) => {
+        this.status = res.statusCode;
+        this.readyState = 2;
+        this.onreadystatechange?.();
+        const chunks: any[] = [];
+        let loaded = 0;
+        res.on('data', (c: any) => {
+          chunks.push(c);
+          loaded += c.length;
+          this.readyState = 3;
+          if (!this.finished) this.onprogress?.({ loaded });
+        });
+        res.on('end', () => {
+          if (this.finished) return;
+          this.finished = true;
+          const all = Buffer.concat(chunks);
+          this.response = this.responseType === 'blob' ? { size: all.length } : all.toString();
+          this.readyState = 4;
+          this.onreadystatechange?.();
+          this.onload?.();
+        });
+        res.on('error', () => this.fail(this.onerror));
+      }
+    );
+    req.on('error', () => this.fail(this.onerror));
+    if (this.timeout) {
+      req.setTimeout(this.timeout, () => {
+        this.fail(this.ontimeout);
+        req.destroy();
+      });
+    }
+    this.req = req;
+    if (!data) {
+      req.end();
+      return;
+    }
+    let sent = 0;
+    const writeNext = () => {
+      if (this.finished) return;
+      if (sent >= data.length) {
+        req.end();
+        return;
+      }
+      const piece = data.subarray(sent, sent + PIECE);
+      sent += piece.length;
+      req.write(piece, () => {
+        if (!this.finished) this.upload.onprogress?.({ loaded: sent });
+        writeNext();
+      });
+    };
+    writeNext();
+  }
 }
 
 function forward(method: string, url: string, body?: any): Promise<{ status: number; headers: any; body: any }> {
@@ -78,25 +183,31 @@ function startProxy() {
       await sleep(link.delayMs);
     }
 
+    const gen = generation;
     let upload;
     if (req.method === 'POST') {
       // Receives the upload at exactly link.mbps
-      const bytesPerMs = (link.mbps * 1_000_000) / 8 / 1000;
-      const start = Date.now();
       const chunks: any[] = [];
-      let total = 0;
-      for await (const chunk of req) {
-        chunks.push(chunk);
-        total += chunk.length;
-        while ((Date.now() - start) * bytesPerMs < total) await sleep(2);
+      try {
+        for await (const chunk of req) {
+          if (gen !== generation) {
+            req.destroy();
+            return;
+          }
+          chunks.push(chunk);
+          await throughLink(chunk.length);
+        }
+      } catch {
+        return; // the client aborted this upload at the end of the test
       }
       upload = Buffer.concat(chunks);
     }
 
     const out = await forward(req.method, req.url, upload);
     res.writeHead(out.status, { 'Content-Type': out.headers['content-type'] });
+    res.flushHeaders(); // headers go out at once, as from a real server
     if (req.method === 'GET' && out.body.length > 10000) {
-      await writePaced(res, out.body);
+      await writePaced(res, out.body, gen);
     } else {
       res.end(out.body);
     }
@@ -110,6 +221,7 @@ function report(name: string, known: string, measured: string) {
 const errorPct = (measured: number, known: number) => (Math.abs(measured - known) / known) * 100;
 
 beforeAll(async () => {
+  (globalThis as any).XMLHttpRequest = NodeXHR;
   const serverDir = path.resolve(__dirname, '../../server');
   server = spawn('node', ['-r', path.resolve(__dirname, 'stubDb.js'), 'server.js'], {
     cwd: serverDir,
@@ -136,74 +248,81 @@ afterAll(async () => {
 
 beforeEach(() => {
   pingCount = 0;
+  linkFreeAt = 0;
+  generation++;
 });
 
+// Request 0 is the warm-up that opens the connection; it is not counted
 describe('latency, jitter and failed requests', () => {
   it('latency is the median round trip and jitter the average change between pings', async () => {
-    link = { mbps: 100, delayMs: 0, pingDelays: [30, 50, 40, 60, 20] };
+    link = { mbps: 100, delayMs: 0, pingDelays: [0, 30, 50, 40, 60, 20, 30, 50, 40, 60, 20] };
     const res = await speedTester.measureLatencyAndJitter(LINK);
-    report('Latency (delays 30,50,40,60,20 ms)', '40 ms', `${res.latency} ms`);
-    report('Jitter (same pings)', '22.5 ms', `${res.jitter} ms`);
+    report('Latency (10 pings, 20-60 ms)', '40 ms', `${res.latency} ms`);
+    report('Jitter (same pings)', '21.1 ms', `${res.jitter} ms`);
     report('Packet loss, nothing failing', '0%', `${res.packetLoss}%`);
     expect(res.latency).toBeGreaterThanOrEqual(40);
-    expect(res.latency).toBeLessThan(55);
-    expect(Math.abs((res.jitter as number) - 22.5)).toBeLessThan(10);
+    expect(res.latency).toBeLessThan(50);
+    expect(Math.abs((res.jitter as number) - 21.1)).toBeLessThan(5);
     expect(res.packetLoss).toBe(0);
   }, 15000);
 
-  it('2 failed requests out of 5 report 40%', async () => {
-    link = { mbps: 100, delayMs: 5, failPings: [1, 3] };
+  it('2 failed requests out of 10 report 20%', async () => {
+    link = { mbps: 100, delayMs: 5, failPings: [2, 6] };
     const res = await speedTester.measureLatencyAndJitter(LINK);
-    report('Packet loss, 2 of 5 requests failing', '40%', `${res.packetLoss}%`);
-    expect(res.packetLoss).toBe(40);
+    report('Packet loss, 2 of 10 requests failing', '20%', `${res.packetLoss}%`);
+    expect(res.packetLoss).toBe(20);
   }, 15000);
 
   it('all requests failing reports 100% and no invented latency', async () => {
-    link = { mbps: 100, delayMs: 0, failPings: [0, 1, 2, 3, 4] };
+    link = { mbps: 100, delayMs: 0, failPings: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] };
     const res = await speedTester.measureLatencyAndJitter(LINK);
     report('All requests failing', '100%, no ms', `${res.packetLoss}%, latency ${res.latency}`);
     expect(res).toEqual({ latency: null, jitter: null, packetLoss: 100 });
   }, 15000);
 });
 
+// Each test runs the real 8 s, 4-connection measurement, stopping early at the data cap
 describe('download', () => {
-  it.each([5, 10, 25, 50])('%i Mbps link, no delay', async known => {
-    link = { mbps: known, delayMs: 0 };
-    const measured = (await speedTester.measureDownload(LINK, 2)) as number;
-    report(`Download 2 MB, no delay`, `${known} Mbps`, `${measured} Mbps (${errorPct(measured, known).toFixed(1)}% off)`);
-    expect(errorPct(measured, known)).toBeLessThan(10);
-  }, 20000);
-
-  // Shows the known limit of a small payload: the delay is counted inside the transfer time
   it.each([
+    [5, 0],
+    [10, 0],
+    [25, 0],
+    [50, 0],
     [10, 50],
     [50, 50],
     [100, 50],
     [200, 50],
   ])('%i Mbps link, %i ms delay', async (known, delayMs) => {
     link = { mbps: known, delayMs };
-    const measured = (await speedTester.measureDownload(LINK, 2)) as number;
-    report(`Download 2 MB, ${delayMs} ms delay`, `${known} Mbps`, `${measured} Mbps (${errorPct(measured, known).toFixed(1)}% off)`);
-    expect(measured).toBeLessThanOrEqual(known * 1.05);
-  }, 20000);
+    const measured = (await speedTester.measureDownload(LINK)) as number;
+    report(`Download, ${delayMs} ms delay`, `${known} Mbps`, `${measured} Mbps (${errorPct(measured, known).toFixed(1)}% off)`);
+    expect(errorPct(measured, known)).toBeLessThan(10);
+  }, 30000);
 
   it('download failure gives no speed', async () => {
-    const measured = await speedTester.measureDownload('http://127.0.0.1:1', 2);
+    const measured = await speedTester.measureDownload('http://127.0.0.1:1');
     report('Download, server unreachable', 'no value', String(measured));
     expect(measured).toBeNull();
   }, 15000);
 });
 
 describe('upload', () => {
-  it.each([2, 5, 10, 20])('%i Mbps link, no delay', async known => {
-    link = { mbps: known, delayMs: 0 };
-    const measured = (await speedTester.measureUpload(LINK, 1)) as number;
-    report(`Upload 1 MB, no delay`, `${known} Mbps`, `${measured} Mbps (${errorPct(measured, known).toFixed(1)}% off)`);
+  it.each([
+    [2, 0],
+    [5, 0],
+    [10, 0],
+    [20, 0],
+    [20, 50],
+    [50, 50],
+  ])('%i Mbps link, %i ms delay', async (known, delayMs) => {
+    link = { mbps: known, delayMs };
+    const measured = (await speedTester.measureUpload(LINK)) as number;
+    report(`Upload, ${delayMs} ms delay`, `${known} Mbps`, `${measured} Mbps (${errorPct(measured, known).toFixed(1)}% off)`);
     expect(errorPct(measured, known)).toBeLessThan(10);
-  }, 20000);
+  }, 30000);
 
   it('upload failure gives no speed', async () => {
-    const measured = await speedTester.measureUpload('http://127.0.0.1:1', 1);
+    const measured = await speedTester.measureUpload('http://127.0.0.1:1');
     report('Upload, server unreachable', 'no value', String(measured));
     expect(measured).toBeNull();
   }, 15000);
@@ -215,9 +334,10 @@ describe('video and web', () => {
     const res = await measureVideo(LINK);
     report('Video start delay', '100 ms', `${res.videoDelayMs} ms`);
     report('Video speed (10 Mbps link, 100 ms delay)', '10 Mbps', `${res.videoMbps} Mbps`);
-    report('Streaming quality for that speed', qualityForMbps(res.videoMbps as number), String(res.streamingQuality));
+    report('Streaming quality for that speed', qualityForMbps(10), String(res.streamingQuality));
     expect(res.videoDelayMs).toBeGreaterThanOrEqual(100);
     expect(res.videoDelayMs).toBeLessThan(160);
+    expect(errorPct(res.videoMbps as number, 10)).toBeLessThan(10);
     expect(res.streamingQuality).toBe(qualityForMbps(res.videoMbps as number));
   }, 20000);
 

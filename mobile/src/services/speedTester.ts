@@ -1,6 +1,7 @@
 import { NativeModules } from 'react-native';
 import NetInfo, { NetInfoStateType } from '@react-native-community/netinfo';
 import { AppConfig, SpeedTestProgress } from '../types';
+import { measureThroughput } from './throughput';
 
 export interface SpeedResult {
   latency: number | null;
@@ -113,35 +114,43 @@ export async function resolvePublicISP(forceFresh: boolean = false): Promise<str
 }
 
 export class SpeedTester {
+  /** One round trip to /ping in ms, or null when it failed or timed out. */
+  private async ping(cleanUrl: string, tag: string): Promise<number | null> {
+    const start = Date.now();
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+
+      const res = await fetch(`${cleanUrl}/ping?_t=${Date.now()}_${tag}`, {
+        method: 'GET',
+        headers: { 'Cache-Control': 'no-cache, no-store' },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      return res.ok ? Date.now() - start : null;
+    } catch (err) {
+      console.warn(`Ping ${tag} failed:`, err);
+      return null;
+    }
+  }
+
   /**
-   * Measures latency, jitter, and packet loss using 5 round-trip HTTP probes (Industry Standard QoS Probes)
+   * Measures latency, jitter, and packet loss using 10 round-trip HTTP probes (Industry Standard QoS Probes)
    */
   async measureLatencyAndJitter(
     serverUrl: string
   ): Promise<{ latency: number | null; jitter: number | null; packetLoss: number }> {
     const latencies: number[] = [];
-    const totalPings = 5;
+    const totalPings = 10;
     const cleanUrl = serverUrl.replace(/\/+$/, '');
 
+    // The first request opens the connection (DNS, TCP and TLS set-up), so it is not counted
+    await this.ping(cleanUrl, 'warmup');
+
     for (let i = 0; i < totalPings; i++) {
-      const start = Date.now();
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
-
-        const res = await fetch(`${cleanUrl}/ping?_t=${Date.now()}_${i}`, {
-          method: 'GET',
-          headers: { 'Cache-Control': 'no-cache, no-store' },
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-
-        if (res.ok) {
-          const duration = Date.now() - start;
-          latencies.push(duration);
-        }
-      } catch (err) {
-        console.warn(`Ping attempt ${i + 1} failed:`, err);
+      const duration = await this.ping(cleanUrl, String(i));
+      if (duration != null) {
+        latencies.push(duration);
       }
     }
 
@@ -175,77 +184,17 @@ export class SpeedTester {
   }
 
   /**
-   * Measures download throughput from /download endpoint
+   * Measures download throughput: 4 parallel connections for 8 s, steady-state speed (see throughput.ts)
    */
-  async measureDownload(serverUrl: string, mb: number = 2): Promise<number | null> {
-    const cleanUrl = serverUrl.replace(/\/+$/, '');
-    const start = Date.now();
-
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 45000);
-
-      const res = await fetch(`${cleanUrl}/download?mb=${mb}&_t=${Date.now()}`, {
-        method: 'GET',
-        headers: { 'Cache-Control': 'no-cache, no-store' },
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-
-      if (!res.ok) {
-        console.warn('Download request failed with status', res.status);
-        return null;
-      }
-
-      const blob = await res.blob();
-      const bytes = blob.size;
-      if (!bytes) {
-        return null;
-      }
-      const durationSec = Math.max((Date.now() - start) / 1000, 0.001);
-      const mbps = (bytes * 8) / 1_000_000 / durationSec;
-      return parseFloat(mbps.toFixed(2));
-    } catch (err) {
-      console.warn('Download speed test failed:', err);
-      return null;
-    }
+  measureDownload(serverUrl: string, onSpeed?: (mbps: number) => void): Promise<number | null> {
+    return measureThroughput('download', serverUrl, onSpeed);
   }
 
   /**
-   * Measures upload throughput by posting dummy binary payload to /upload
+   * Measures upload throughput: 4 parallel connections for 8 s, steady-state speed (see throughput.ts)
    */
-  async measureUpload(serverUrl: string, mb: number = 1): Promise<number | null> {
-    const cleanUrl = serverUrl.replace(/\/+$/, '');
-    const byteLength = mb * 1024 * 1024;
-    const dummyData = new Uint8Array(byteLength);
-
-    const start = Date.now();
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 45000);
-
-      const res = await fetch(`${cleanUrl}/upload`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/octet-stream',
-        },
-        body: dummyData,
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-
-      if (!res.ok) {
-        console.warn('Upload request failed with status', res.status);
-        return null;
-      }
-
-      const durationSec = Math.max((Date.now() - start) / 1000, 0.001);
-      const mbps = (byteLength * 8) / 1_000_000 / durationSec;
-      return parseFloat(mbps.toFixed(2));
-    } catch (err) {
-      console.warn('Upload speed test failed:', err);
-      return null;
-    }
+  measureUpload(serverUrl: string, onSpeed?: (mbps: number) => void): Promise<number | null> {
+    return measureThroughput('upload', serverUrl, onSpeed);
   }
 
   /**
@@ -364,20 +313,37 @@ export class SpeedTester {
     onProgress?.({
       phase: 'download',
       latency: pingRes.latency ?? undefined,
-      message: `Downloading ${config.downloadMB} MB payload...`,
-      progressPercent: 45,
+      message: 'Measuring download speed...',
+      progressPercent: 30,
     });
-    const downMbps = await this.measureDownload(config.serverUrl, config.downloadMB);
+    const downMbps = await this.measureDownload(config.serverUrl, liveMbps =>
+      onProgress?.({
+        phase: 'download',
+        latency: pingRes.latency ?? undefined,
+        downSpeed: liveMbps,
+        message: 'Measuring download speed...',
+        progressPercent: 45,
+      })
+    );
 
     // Step 3: Upload
     onProgress?.({
       phase: 'upload',
       latency: pingRes.latency ?? undefined,
       downSpeed: downMbps ?? undefined,
-      message: `Uploading ${config.uploadMB} MB payload...`,
-      progressPercent: 75,
+      message: 'Measuring upload speed...',
+      progressPercent: 65,
     });
-    const upMbps = await this.measureUpload(config.serverUrl, config.uploadMB);
+    const upMbps = await this.measureUpload(config.serverUrl, liveMbps =>
+      onProgress?.({
+        phase: 'upload',
+        latency: pingRes.latency ?? undefined,
+        downSpeed: downMbps ?? undefined,
+        upSpeed: liveMbps,
+        message: 'Measuring upload speed...',
+        progressPercent: 80,
+      })
+    );
 
     // Final result
     onProgress?.({

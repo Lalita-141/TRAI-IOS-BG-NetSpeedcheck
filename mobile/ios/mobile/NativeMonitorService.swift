@@ -432,9 +432,10 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
             carrierName = await resolvePublicISP(session: session)
         }
 
-        // 2. Measure Latency (5 pings)
+        // 2. Measure Latency: a warm-up request opens the connection (not counted), then 10 pings
+        let pingCount = 10
         var pings: [Double] = []
-        for i in 0..<5 {
+        for i in -1..<pingCount {
             let pingUrl = serverUrl.appendingPathComponent("ping")
             var comps = URLComponents(url: pingUrl, resolvingAgainstBaseURL: false)
             comps?.queryItems = [URLQueryItem(name: "_t", value: "\(Date().timeIntervalSince1970)_\(i)")]
@@ -442,13 +443,17 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
             if let target = comps?.url {
                 let s = Date()
                 if let (_, resp) = try? await session.data(from: target),
-                   (resp as? HTTPURLResponse)?.statusCode == 200 {
+                   (resp as? HTTPURLResponse)?.statusCode == 200, i >= 0 {
                     pings.append(Date().timeIntervalSince(s) * 1000)
                 }
             }
         }
 
-        let latency: Double? = pings.isEmpty ? nil : pings.sorted()[pings.count / 2]
+        let latency: Double? = pings.isEmpty ? nil : {
+            let sorted = pings.sorted()
+            let mid = sorted.count / 2
+            return sorted.count % 2 == 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
+        }()
         var jitter: Double?
         if pings.count > 1 {
             var diff = 0.0
@@ -457,35 +462,11 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
             }
             jitter = diff / Double(pings.count - 1)
         }
-        let packetLoss = Double((5 - pings.count) * 20)
+        let packetLoss = (Double(pingCount - pings.count) / Double(pingCount) * 100).rounded()
 
-        // 3. Measure Download (2 MB)
-        var downMbps: Double?
-        let downUrl = serverUrl.appendingPathComponent("download")
-        var downComps = URLComponents(url: downUrl, resolvingAgainstBaseURL: false)
-        downComps?.queryItems = [URLQueryItem(name: "mb", value: "2"), URLQueryItem(name: "_t", value: "\(Date().timeIntervalSince1970)")]
-        if let downTarget = downComps?.url {
-            let start = Date()
-            if let (data, resp) = try? await session.data(from: downTarget),
-               (resp as? HTTPURLResponse)?.statusCode == 200, !data.isEmpty {
-                let duration = max(Date().timeIntervalSince(start), 0.001)
-                downMbps = Double(data.count * 8) / 1_000_000 / duration
-            }
-        }
-
-        // 4. Measure Upload (1 MB)
-        var upMbps: Double?
-        let upUrl = serverUrl.appendingPathComponent("upload")
-        var upReq = URLRequest(url: upUrl)
-        upReq.httpMethod = "POST"
-        upReq.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-        let dummyData = Data(count: 1024 * 1024)
-        let upStart = Date()
-        if let (_, resp) = try? await session.upload(for: upReq, from: dummyData),
-           (resp as? HTTPURLResponse)?.statusCode == 200 {
-            let duration = max(Date().timeIntervalSince(upStart), 0.001)
-            upMbps = Double(dummyData.count * 8) / 1_000_000 / duration
-        }
+        // 3. Measure Download and 4. Upload: 4 connections for 8 s each, steady-state speed
+        let downMbps = await ThroughputMeter(isUpload: false, baseUrl: serverUrl).run()
+        let upMbps = await ThroughputMeter(isUpload: true, baseUrl: serverUrl).run()
 
         // 5. Build Sample & Upload to server
         func rounded(_ value: Double?, _ places: Double) -> Any {
@@ -534,6 +515,163 @@ final class NativeMonitorService: NSObject, CLLocationManagerDelegate {
                 markScheduledRun(period: period, at: Date().timeIntervalSince1970)
             }
         }
+    }
+}
+
+/// Timed, multi-connection throughput test: the same method and numbers as
+/// src/services/throughput.ts. Several parallel transfers for a fixed time, with the
+/// connection start-up period left out; upload counts only bytes the server has confirmed.
+final class ThroughputMeter: NSObject, URLSessionDataDelegate {
+    private static let duration: TimeInterval = 8
+    private static let connections = 4
+    private static let rampUpFraction = 0.3
+    private static let downloadCapBytes = 100 * 1024 * 1024
+    private static let uploadCapBytes = 50 * 1024 * 1024
+    private static let downloadRequestMB = 20
+    private static let uploadChunkMinBytes = 64 * 1024
+    private static let uploadChunkMaxBytes = 8 * 1024 * 1024
+    private static let uploadChunkTargetSeconds = 0.5
+
+    private let isUpload: Bool
+    private let baseUrl: URL
+    private let queue = OperationQueue()
+    private var session: URLSession?
+    private var start = Date()
+    private var total = 0
+    private var points: [(t: Double, bytes: Double)] = []
+    private var openConnections = ThroughputMeter.connections
+    private var slotOf: [Int: Int] = [:]
+    private var bytesOf: [Int: Int] = [:] // download: bytes received; upload: chunk size
+    private var startOf: [Int: Date] = [:]
+    private var uploadBodies: [Int: Data] = [:]
+    private var done = false
+    private var continuation: CheckedContinuation<Double?, Never>?
+
+    init(isUpload: Bool, baseUrl: URL) {
+        self.isUpload = isUpload
+        self.baseUrl = baseUrl
+        super.init()
+        queue.maxConcurrentOperationCount = 1
+    }
+
+    /// Steady-state speed in Mbps, or nil when nothing was transferred.
+    func run() async -> Double? {
+        await withCheckedContinuation { cont in
+            queue.addOperation {
+                self.continuation = cont
+                self.session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: self.queue)
+                self.start = Date()
+                for slot in 0..<ThroughputMeter.connections {
+                    self.startRequest(slot: slot, uploadBytes: ThroughputMeter.uploadChunkMinBytes)
+                }
+                DispatchQueue.global().asyncAfter(deadline: .now() + ThroughputMeter.duration) {
+                    self.queue.addOperation { self.finish() }
+                }
+            }
+        }
+    }
+
+    private func startRequest(slot: Int, uploadBytes: Int) {
+        guard !done, let session = session else { return }
+        let stamp = "\(Date().timeIntervalSince1970)_\(slot)"
+        let task: URLSessionTask
+        if isUpload {
+            var comps = URLComponents(url: baseUrl.appendingPathComponent("upload"), resolvingAgainstBaseURL: false)
+            comps?.queryItems = [URLQueryItem(name: "_t", value: stamp)]
+            guard let url = comps?.url else { return }
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+            let body = uploadBodies[uploadBytes] ?? Data(count: uploadBytes)
+            uploadBodies[uploadBytes] = body
+            task = session.uploadTask(with: req, from: body)
+            bytesOf[task.taskIdentifier] = uploadBytes
+        } else {
+            var comps = URLComponents(url: baseUrl.appendingPathComponent("download"), resolvingAgainstBaseURL: false)
+            comps?.queryItems = [
+                URLQueryItem(name: "mb", value: String(ThroughputMeter.downloadRequestMB)),
+                URLQueryItem(name: "_t", value: stamp),
+            ]
+            guard let url = comps?.url else { return }
+            var req = URLRequest(url: url)
+            req.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
+            task = session.dataTask(with: req)
+            bytesOf[task.taskIdentifier] = 0
+        }
+        slotOf[task.taskIdentifier] = slot
+        startOf[task.taskIdentifier] = Date()
+        task.resume()
+    }
+
+    private func record(_ delta: Int) {
+        guard !done, delta > 0 else { return }
+        total += delta
+        points.append((t: Date().timeIntervalSince(start) * 1000, bytes: Double(total)))
+        if total >= (isUpload ? ThroughputMeter.uploadCapBytes : ThroughputMeter.downloadCapBytes) {
+            finish()
+        }
+    }
+
+    // A connection that fails stops; the test ends early only when all of them have
+    private func connectionEnded() {
+        openConnections -= 1
+        if openConnections == 0 { finish() }
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        // An upload task also receives the server's short reply; only download bytes count here
+        guard !isUpload, !done else { return }
+        bytesOf[dataTask.taskIdentifier, default: 0] += data.count
+        record(data.count)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        let id = task.taskIdentifier
+        guard !done, let slot = slotOf.removeValue(forKey: id) else { return }
+        let bytes = bytesOf.removeValue(forKey: id) ?? 0
+        let started = startOf.removeValue(forKey: id) ?? Date()
+        let status = (task.response as? HTTPURLResponse)?.statusCode ?? 0
+        guard error == nil, (200..<300).contains(status), bytes > 0 else {
+            connectionEnded()
+            return
+        }
+        if isUpload {
+            record(bytes) // the server's reply confirms it received the whole chunk
+            let quick = Date().timeIntervalSince(started) < ThroughputMeter.uploadChunkTargetSeconds
+            startRequest(slot: slot, uploadBytes: quick ? min(bytes * 2, ThroughputMeter.uploadChunkMaxBytes) : bytes)
+        } else {
+            startRequest(slot: slot, uploadBytes: 0)
+        }
+    }
+
+    private func finish() {
+        guard !done else { return }
+        done = true
+        session?.invalidateAndCancel()
+        session = nil
+        continuation?.resume(returning: ThroughputMeter.steadyStateMbps(points))
+        continuation = nil
+    }
+
+    /// Bytes moved by time t, interpolated between progress points (0 bytes at t = 0).
+    private static func bytesAt(_ points: [(t: Double, bytes: Double)], _ t: Double) -> Double {
+        var prev = (t: 0.0, bytes: 0.0)
+        for p in points {
+            if p.t >= t {
+                let span = p.t - prev.t
+                return span > 0 ? prev.bytes + (p.bytes - prev.bytes) * (t - prev.t) / span : p.bytes
+            }
+            prev = p
+        }
+        return prev.bytes
+    }
+
+    /// Bytes moved after the ramp-up period ÷ the time they took, in Mbps.
+    static func steadyStateMbps(_ points: [(t: Double, bytes: Double)]) -> Double? {
+        guard let end = points.last, end.bytes > 0, end.t > 0 else { return nil }
+        let from = end.t * rampUpFraction
+        let bytes = end.bytes - bytesAt(points, from)
+        return bytes * 8 / 1_000_000 / ((end.t - from) / 1000)
     }
 }
 

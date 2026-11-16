@@ -23,6 +23,9 @@ import {
   CloseIcon,
   LightningIcon,
   VideoBrowserTestIcon,
+  GlobeIcon,
+  ShieldIcon,
+  SignalBarsIcon,
   CoverageTestIcon,
   AdvanceTestsIcon,
   PinIcon,
@@ -31,6 +34,7 @@ import {
   MinusIcon,
 } from './Icons';
 import { useTranslation } from '../i18n';
+import { sampleKind } from '../utils/sampleDisplay';
 import { HistoryTestDetailView } from './HistoryTestDetailView';
 
 interface HistoryViewProps {
@@ -60,7 +64,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 }) => {
   const { t } = useTranslation();
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
-  const [historyMapType, setHistoryMapType] = useState<'map' | 'satellite'>('map');
+  const [historyMapType, setHistoryMapType] = useState<'map' | 'satellite'>(
+    'map',
+  );
   const mapWebViewRef = useRef<any>(null);
   const [filters, setFilters] = useState<FilterState>({
     testType: 'ALL',
@@ -99,7 +105,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     });
   };
 
-  const [selectedSampleForDetail, setSelectedSampleForDetail] = useState<Sample | null>(null);
+  const [selectedSampleForDetail, setSelectedSampleForDetail] =
+    useState<Sample | null>(null);
   const [capacityInfo, setCapacityInfo] = useState<{
     count: number;
     maxLimit: number;
@@ -109,7 +116,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     count: samples.length,
     maxLimit: sampleStore.getMaxHistoryLimit(),
     isFull: samples.length >= sampleStore.getMaxHistoryLimit(),
-    usagePercent: Math.min(100, Math.round((samples.length / sampleStore.getMaxHistoryLimit()) * 100)),
+    usagePercent: Math.min(
+      100,
+      Math.round((samples.length / sampleStore.getMaxHistoryLimit()) * 100),
+    ),
   });
 
   useEffect(() => {
@@ -124,12 +134,23 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
   // Count items per test type for pill badges
   const testTypeCounts = useMemo(() => {
-    const counts = { ALL: samples.length, SPEED: 0, VIDEO: 0, COVERAGE: 0, ADVANCE: 0 };
+    const counts = {
+      ALL: samples.length,
+      SPEED: 0,
+      VIDEO: 0,
+      COVERAGE: 0,
+      ADVANCE: 0,
+    };
     samples.forEach(s => {
       const typeStr = (s.test_type || 'speed').toLowerCase();
       if (typeStr === 'video' || typeStr === 'video_browser') counts.VIDEO++;
       else if (typeStr === 'coverage') counts.COVERAGE++;
-      else if (typeStr === 'advance' || typeStr === 'continuous' || typeStr === 'scheduled') counts.ADVANCE++;
+      else if (
+        typeStr === 'advance' ||
+        typeStr === 'continuous' ||
+        typeStr === 'scheduled'
+      )
+        counts.ADVANCE++;
       else counts.SPEED++;
     });
     return counts;
@@ -141,15 +162,29 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       // 1. Test Type
       const typeStr = (s.test_type || 'speed').toLowerCase();
       if (selectedTestType === 'SPEED' && typeStr !== 'speed') return false;
-      if (selectedTestType === 'VIDEO' && typeStr !== 'video' && typeStr !== 'video_browser') return false;
-      if (selectedTestType === 'COVERAGE' && typeStr !== 'coverage') return false;
-      if (selectedTestType === 'ADVANCE' && typeStr !== 'advance' && typeStr !== 'continuous' && typeStr !== 'scheduled') return false;
+      if (
+        selectedTestType === 'VIDEO' &&
+        typeStr !== 'video' &&
+        typeStr !== 'video_browser'
+      )
+        return false;
+      if (selectedTestType === 'COVERAGE' && typeStr !== 'coverage')
+        return false;
+      if (
+        selectedTestType === 'ADVANCE' &&
+        typeStr !== 'advance' &&
+        typeStr !== 'continuous' &&
+        typeStr !== 'scheduled'
+      )
+        return false;
 
       // 2. Operator
       if (selectedOperator !== 'ALL') {
         const carrier = (s.carrier || '').toLowerCase();
-        if (selectedOperator === 'AIRTEL' && !carrier.includes('airtel')) return false;
-        if (selectedOperator === 'JIO' && !carrier.includes('jio')) return false;
+        if (selectedOperator === 'AIRTEL' && !carrier.includes('airtel'))
+          return false;
+        if (selectedOperator === 'JIO' && !carrier.includes('jio'))
+          return false;
         if (
           selectedOperator === 'VI' &&
           !carrier.includes('vi') &&
@@ -157,7 +192,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           !carrier.includes('idea')
         )
           return false;
-        if (selectedOperator === 'BSNL' && !carrier.includes('bsnl') && !carrier.includes('mtnl'))
+        if (
+          selectedOperator === 'BSNL' &&
+          !carrier.includes('bsnl') &&
+          !carrier.includes('mtnl')
+        )
           return false;
       }
 
@@ -174,18 +213,26 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     // Average only tests that measured the value: a coverage test has no speed
     const average = (values: (number | null | undefined)[]) => {
       const nums = values.filter((v): v is number => v != null);
-      return nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+      return nums.length > 0
+        ? nums.reduce((a, b) => a + b, 0) / nums.length
+        : 0;
     };
     return {
       total: filteredSamples.length,
-      avgDown: parseFloat(average(filteredSamples.map(s => s.down_mbps)).toFixed(1)),
-      avgUp: parseFloat(average(filteredSamples.map(s => s.up_mbps)).toFixed(1)),
+      avgDown: parseFloat(
+        average(filteredSamples.map(s => s.down_mbps)).toFixed(1),
+      ),
+      avgUp: parseFloat(
+        average(filteredSamples.map(s => s.up_mbps)).toFixed(1),
+      ),
       avgPing: Math.round(average(filteredSamples.map(s => s.latency_ms))),
     };
   }, [filteredSamples]);
 
   const hasActiveFilters =
-    selectedTestType !== 'ALL' || selectedOperator !== 'ALL' || selectedMode !== 'ALL';
+    selectedTestType !== 'ALL' ||
+    selectedOperator !== 'ALL' ||
+    selectedMode !== 'ALL';
 
   // Group or date label
   const latestDateLabel = useMemo(() => {
@@ -212,44 +259,50 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
   // Map markers: only tests with a real GPS position are drawn
   const mapMarkersData = useMemo(() => {
-    return filteredSamples.filter(s => s.lat != null && s.lng != null).map(s => {
-      const { lat, lng } = s;
-      const down = s.down_mbps;
-      const up = s.up_mbps;
-      const ping = s.latency_ms;
-      const jitter = s.jitter_ms;
-      const testType = (s.test_type || 'speed').toUpperCase();
-      const carrier =
-        s.carrier && s.carrier !== '--' && s.carrier !== 'wifi'
-          ? s.carrier
-          : s.network === 'wifi'
-          ? 'Wi-Fi'
-          : s.radio || 'Cellular';
+    return filteredSamples
+      .filter(s => s.lat != null && s.lng != null)
+      .map(s => {
+        const { lat, lng } = s;
+        const down = s.down_mbps;
+        const up = s.up_mbps;
+        const ping = s.latency_ms;
+        const jitter = s.jitter_ms;
+        const testType = (s.test_type || 'speed').toUpperCase();
+        const carrier =
+          s.carrier && s.carrier !== '--' && s.carrier !== 'wifi'
+            ? s.carrier
+            : s.network === 'wifi'
+            ? 'Wi-Fi'
+            : s.radio || 'Cellular';
 
-      const d = new Date(s.ts * 1000);
-      const timeStr = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+        const d = new Date(s.ts * 1000);
+        const timeStr = d.toLocaleTimeString([], {
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true,
+        });
 
-      let color = '#EF4444';
-      if (down == null) color = '#94A3B8';
-      else if (down >= 50) color = '#10B981';
-      else if (down >= 25) color = '#00A389';
-      else if (down >= 10) color = '#F59E0B';
+        let color = '#EF4444';
+        if (down == null) color = '#94A3B8';
+        else if (down >= 50) color = '#10B981';
+        else if (down >= 25) color = '#00A389';
+        else if (down >= 10) color = '#F59E0B';
 
-      return {
-        id: s.id,
-        lat,
-        lng,
-        down,
-        up,
-        ping,
-        jitter,
-        testType,
-        carrier,
-        network: s.network === 'wifi' ? 'Wi-Fi' : s.radio || 'Mobile Data',
-        timeStr,
-        color,
-      };
-    });
+        return {
+          id: s.id,
+          lat,
+          lng,
+          down,
+          up,
+          ping,
+          jitter,
+          testType,
+          carrier,
+          network: s.network === 'wifi' ? 'Wi-Fi' : s.radio || 'Mobile Data',
+          timeStr,
+          color,
+        };
+      });
   }, [filteredSamples]);
 
   // Synchronize markers to WebView when filters change
@@ -257,26 +310,34 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     if (viewMode === 'map' && mapWebViewRef.current) {
       const payload = JSON.stringify(mapMarkersData);
       mapWebViewRef.current.injectJavaScript(
-        `if (window.updateHistoryMarkers) { window.updateHistoryMarkers(${payload}); } true;`
+        `if (window.updateHistoryMarkers) { window.updateHistoryMarkers(${payload}); } true;`,
       );
     }
   }, [mapMarkersData, viewMode]);
 
   const handleToggleHistoryMapType = (type: 'map' | 'satellite') => {
     setHistoryMapType(type);
-    mapWebViewRef.current?.injectJavaScript(`if (window.setMapType) { window.setMapType('${type}'); } true;`);
+    mapWebViewRef.current?.injectJavaScript(
+      `if (window.setMapType) { window.setMapType('${type}'); } true;`,
+    );
   };
 
   const handleRecenterHistoryMap = () => {
-    mapWebViewRef.current?.injectJavaScript('if (window.recenterHistoryMap) { window.recenterHistoryMap(); } true;');
+    mapWebViewRef.current?.injectJavaScript(
+      'if (window.recenterHistoryMap) { window.recenterHistoryMap(); } true;',
+    );
   };
 
   const handleZoomInHistoryMap = () => {
-    mapWebViewRef.current?.injectJavaScript('if (window.zoomInMap) { window.zoomInMap(); } true;');
+    mapWebViewRef.current?.injectJavaScript(
+      'if (window.zoomInMap) { window.zoomInMap(); } true;',
+    );
   };
 
   const handleZoomOutHistoryMap = () => {
-    mapWebViewRef.current?.injectJavaScript('if (window.zoomOutMap) { window.zoomOutMap(); } true;');
+    mapWebViewRef.current?.injectJavaScript(
+      'if (window.zoomOutMap) { window.zoomOutMap(); } true;',
+    );
   };
 
   // Generate Leaflet Map HTML with custom speed pins and popups
@@ -561,7 +622,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           onPress: () => exportSamplesAsJSON(filteredSamples),
         },
         { text: 'Cancel', style: 'cancel' },
-      ]
+      ],
     );
   };
 
@@ -589,13 +650,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             onRefresh();
           },
         },
-      ]
+      ],
     );
   };
 
   const formatTime = (epochSec: number) => {
     const d = new Date(epochSec * 1000);
-    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+    return d.toLocaleTimeString([], {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
   };
 
   const getTestTypeInfo = (type?: string) => {
@@ -616,7 +681,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         border: '#A7F3D0',
       };
     }
-    if (typeStr === 'advance' || typeStr === 'continuous' || typeStr === 'scheduled') {
+    if (
+      typeStr === 'advance' ||
+      typeStr === 'continuous' ||
+      typeStr === 'scheduled'
+    ) {
       return {
         label: 'Advance',
         color: '#D97706',
@@ -648,12 +717,14 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         : carrier;
 
     const typeInfo = getTestTypeInfo(item.test_type);
+    const kind = sampleKind(item);
 
     return (
       <TouchableOpacity
         style={styles.recordCard}
         activeOpacity={0.85}
-        onPress={() => setSelectedSampleForDetail(item)}>
+        onPress={() => setSelectedSampleForDetail(item)}
+      >
         {/* Top Header Row (Time, Test Type Badge, Carrier, Chevron) */}
         <View style={styles.cardHeader}>
           <View style={styles.timeAndTypeRow}>
@@ -663,8 +734,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               style={[
                 styles.testTypeBadge,
                 { backgroundColor: typeInfo.bg, borderColor: typeInfo.border },
-              ]}>
-              <Text style={[styles.testTypeBadgeText, { color: typeInfo.color }]}>
+              ]}
+            >
+              <Text
+                style={[styles.testTypeBadgeText, { color: typeInfo.color }]}
+              >
                 {typeInfo.label}
               </Text>
             </View>
@@ -687,39 +761,120 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           </View>
         </View>
 
-        {/* 4-Metrics Quick Columns */}
+        {/* 4-Metrics Quick Columns (video and coverage results show their own values, not "--") */}
         <View style={styles.metricsRow}>
-          <View style={styles.metricItem}>
-            <DownloadIcon size={14} color="#0284C7" />
-            <Text style={styles.metricVal}>
-              {item.down_mbps != null ? item.down_mbps.toFixed(1) : '--'}
-            </Text>
-            <Text style={styles.metricUnit}>Mbps</Text>
-          </View>
-
-          <View style={styles.metricItem}>
-            <UploadIcon size={14} color="#7C3AED" />
-            <Text style={styles.metricVal}>
-              {item.up_mbps != null ? item.up_mbps.toFixed(1) : '--'}
-            </Text>
-            <Text style={styles.metricUnit}>Mbps</Text>
-          </View>
-
-          <View style={styles.metricItem}>
-            <ClockIcon size={14} color="#D97706" />
-            <Text style={styles.metricVal}>
-              {item.latency_ms != null ? Math.round(item.latency_ms) : '--'}
-            </Text>
-            <Text style={styles.metricUnit}>ms</Text>
-          </View>
-
-          <View style={styles.metricItem}>
-            <WaveformIcon size={14} color="#DB2777" />
-            <Text style={styles.metricVal}>
-              {item.jitter_ms != null ? item.jitter_ms.toFixed(1) : '--'}
-            </Text>
-            <Text style={styles.metricUnit}>ms</Text>
-          </View>
+          {(kind === 'coverage'
+            ? [
+                {
+                  key: 'lat',
+                  icon: <ClockIcon size={14} color="#D97706" />,
+                  value:
+                    item.latency_ms != null
+                      ? Math.round(item.latency_ms)
+                      : '--',
+                  unit: 'ms',
+                },
+                {
+                  key: 'jit',
+                  icon: <WaveformIcon size={14} color="#DB2777" />,
+                  value:
+                    item.jitter_ms != null ? item.jitter_ms.toFixed(1) : '--',
+                  unit: 'ms',
+                },
+                {
+                  key: 'loss',
+                  icon: <ShieldIcon size={14} color="#059669" />,
+                  value:
+                    item.packet_loss_pct != null
+                      ? Number(item.packet_loss_pct.toFixed(1))
+                      : '--',
+                  unit: '% loss',
+                },
+                {
+                  key: 'sig',
+                  icon: <SignalBarsIcon size={14} color="#0284C7" />,
+                  value:
+                    item.signal_dbm != null
+                      ? Math.round(item.signal_dbm)
+                      : '--',
+                  unit: 'dBm',
+                },
+              ]
+            : kind === 'video'
+            ? [
+                {
+                  key: 'down',
+                  icon: <DownloadIcon size={14} color="#0284C7" />,
+                  value:
+                    item.down_mbps != null ? item.down_mbps.toFixed(1) : '--',
+                  unit: 'Mbps',
+                },
+                {
+                  key: 'vdelay',
+                  icon: <VideoBrowserTestIcon size={14} color="#4F46E5" />,
+                  value:
+                    item.video_delay_ms != null
+                      ? Math.round(item.video_delay_ms)
+                      : '--',
+                  unit: 'ms',
+                },
+                {
+                  key: 'wdelay',
+                  icon: <GlobeIcon size={14} color="#7C3AED" />,
+                  value:
+                    item.web_delay_ms != null
+                      ? Math.round(item.web_delay_ms)
+                      : '--',
+                  unit: 'ms',
+                },
+                {
+                  key: 'ttfb',
+                  icon: <ClockIcon size={14} color="#D97706" />,
+                  value:
+                    (item.ttfb_ms ?? item.latency_ms) != null
+                      ? Math.round((item.ttfb_ms ?? item.latency_ms) as number)
+                      : '--',
+                  unit: 'ms',
+                },
+              ]
+            : [
+                {
+                  key: 'down',
+                  icon: <DownloadIcon size={14} color="#0284C7" />,
+                  value:
+                    item.down_mbps != null ? item.down_mbps.toFixed(1) : '--',
+                  unit: 'Mbps',
+                },
+                {
+                  key: 'up',
+                  icon: <UploadIcon size={14} color="#7C3AED" />,
+                  value: item.up_mbps != null ? item.up_mbps.toFixed(1) : '--',
+                  unit: 'Mbps',
+                },
+                {
+                  key: 'lat',
+                  icon: <ClockIcon size={14} color="#D97706" />,
+                  value:
+                    item.latency_ms != null
+                      ? Math.round(item.latency_ms)
+                      : '--',
+                  unit: 'ms',
+                },
+                {
+                  key: 'jit',
+                  icon: <WaveformIcon size={14} color="#DB2777" />,
+                  value:
+                    item.jitter_ms != null ? item.jitter_ms.toFixed(1) : '--',
+                  unit: 'ms',
+                },
+              ]
+          ).map(m => (
+            <View key={m.key} style={styles.metricItem}>
+              {m.icon}
+              <Text style={styles.metricVal}>{m.value}</Text>
+              <Text style={styles.metricUnit}>{m.unit}</Text>
+            </View>
+          ))}
         </View>
       </TouchableOpacity>
     );
@@ -754,27 +909,37 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       {/* Top Segmented Sub-Nav: List | Map */}
       <View style={styles.topSegmentedRow}>
         <TouchableOpacity
-          style={[styles.segmentedTab, viewMode === 'list' && styles.segmentedTabActive]}
+          style={[
+            styles.segmentedTab,
+            viewMode === 'list' && styles.segmentedTabActive,
+          ]}
           onPress={() => setViewMode('list')}
-          activeOpacity={0.8}>
+          activeOpacity={0.8}
+        >
           <Text
             style={[
               styles.segmentedTabText,
               viewMode === 'list' && styles.segmentedTabTextActive,
-            ]}>
+            ]}
+          >
             {t('tab_list', 'List')}
           </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.segmentedTab, viewMode === 'map' && styles.segmentedTabActive]}
+          style={[
+            styles.segmentedTab,
+            viewMode === 'map' && styles.segmentedTabActive,
+          ]}
           onPress={() => setViewMode('map')}
-          activeOpacity={0.8}>
+          activeOpacity={0.8}
+        >
           <Text
             style={[
               styles.segmentedTabText,
               viewMode === 'map' && styles.segmentedTabTextActive,
-            ]}>
+            ]}
+          >
             {t('tab_map', 'Map')}
           </Text>
         </TouchableOpacity>
@@ -784,7 +949,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       <View style={styles.summaryCard}>
         <View style={styles.summaryItem}>
           <Text style={styles.summaryValue}>{summary.total}</Text>
-          <Text style={styles.summaryLabel}>{t('total_tests', 'Total Tests')}</Text>
+          <Text style={styles.summaryLabel}>
+            {t('total_tests', 'Total Tests')}
+          </Text>
         </View>
 
         <View style={styles.summaryDivider} />
@@ -793,7 +960,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           <Text style={styles.summaryValue}>
             {summary.avgDown > 0 ? summary.avgDown : '--'}
           </Text>
-          <Text style={styles.summaryLabel}>{t('avg_download', 'Avg Download')}</Text>
+          <Text style={styles.summaryLabel}>
+            {t('avg_download', 'Avg Download')}
+          </Text>
           <Text style={styles.summarySubLabel}>(Mbps)</Text>
         </View>
 
@@ -803,7 +972,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           <Text style={styles.summaryValue}>
             {summary.avgUp > 0 ? summary.avgUp : '--'}
           </Text>
-          <Text style={styles.summaryLabel}>{t('avg_upload', 'Avg Upload')}</Text>
+          <Text style={styles.summaryLabel}>
+            {t('avg_upload', 'Avg Upload')}
+          </Text>
           <Text style={styles.summarySubLabel}>(Mbps)</Text>
         </View>
 
@@ -830,13 +1001,15 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 selectedTestType === 'ALL' && styles.testTypePillActive,
               ]}
               onPress={() => setSelectedTestType('ALL')}
-              activeOpacity={0.8}>
+              activeOpacity={0.8}
+            >
               <Text
                 style={[
                   styles.testTypePillText,
                   selectedTestType === 'ALL' && styles.testTypePillTextActive,
                 ]}
-                numberOfLines={1}>
+                numberOfLines={1}
+              >
                 {t('filter_all', 'All')} ({testTypeCounts.ALL})
               </Text>
             </TouchableOpacity>
@@ -847,7 +1020,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 selectedTestType === 'SPEED' && styles.testTypePillActive,
               ]}
               onPress={() => setSelectedTestType('SPEED')}
-              activeOpacity={0.8}>
+              activeOpacity={0.8}
+            >
               <LightningIcon
                 size={13}
                 color={selectedTestType === 'SPEED' ? '#FFFFFF' : '#00A389'}
@@ -857,7 +1031,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                   styles.testTypePillText,
                   selectedTestType === 'SPEED' && styles.testTypePillTextActive,
                 ]}
-                numberOfLines={1}>
+                numberOfLines={1}
+              >
                 {t('filter_speed', 'Speed')} ({testTypeCounts.SPEED})
               </Text>
             </TouchableOpacity>
@@ -868,7 +1043,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 selectedTestType === 'VIDEO' && styles.testTypePillActive,
               ]}
               onPress={() => setSelectedTestType('VIDEO')}
-              activeOpacity={0.8}>
+              activeOpacity={0.8}
+            >
               <VideoBrowserTestIcon
                 size={13}
                 color={selectedTestType === 'VIDEO' ? '#FFFFFF' : '#4338CA'}
@@ -878,7 +1054,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                   styles.testTypePillText,
                   selectedTestType === 'VIDEO' && styles.testTypePillTextActive,
                 ]}
-                numberOfLines={1}>
+                numberOfLines={1}
+              >
                 {t('filter_video', 'Video')} ({testTypeCounts.VIDEO})
               </Text>
             </TouchableOpacity>
@@ -892,7 +1069,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 selectedTestType === 'COVERAGE' && styles.testTypePillActive,
               ]}
               onPress={() => setSelectedTestType('COVERAGE')}
-              activeOpacity={0.8}>
+              activeOpacity={0.8}
+            >
               <CoverageTestIcon
                 size={13}
                 color={selectedTestType === 'COVERAGE' ? '#FFFFFF' : '#059669'}
@@ -900,9 +1078,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               <Text
                 style={[
                   styles.testTypePillText,
-                  selectedTestType === 'COVERAGE' && styles.testTypePillTextActive,
+                  selectedTestType === 'COVERAGE' &&
+                    styles.testTypePillTextActive,
                 ]}
-                numberOfLines={1}>
+                numberOfLines={1}
+              >
                 {t('filter_coverage', 'Coverage')} ({testTypeCounts.COVERAGE})
               </Text>
             </TouchableOpacity>
@@ -913,7 +1093,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 selectedTestType === 'ADVANCE' && styles.testTypePillActive,
               ]}
               onPress={() => setSelectedTestType('ADVANCE')}
-              activeOpacity={0.8}>
+              activeOpacity={0.8}
+            >
               <AdvanceTestsIcon
                 size={13}
                 color={selectedTestType === 'ADVANCE' ? '#FFFFFF' : '#D97706'}
@@ -921,9 +1102,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               <Text
                 style={[
                   styles.testTypePillText,
-                  selectedTestType === 'ADVANCE' && styles.testTypePillTextActive,
+                  selectedTestType === 'ADVANCE' &&
+                    styles.testTypePillTextActive,
                 ]}
-                numberOfLines={1}>
+                numberOfLines={1}
+              >
                 {t('filter_advance', 'Advance')} ({testTypeCounts.ADVANCE})
               </Text>
             </TouchableOpacity>
@@ -939,16 +1122,22 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               selectedOperator !== 'ALL' && styles.dropdownTriggerBtnActive,
             ]}
             onPress={() =>
-              setActiveDropdown(activeDropdown === 'operator' ? null : 'operator')
+              setActiveDropdown(
+                activeDropdown === 'operator' ? null : 'operator',
+              )
             }
-            activeOpacity={0.8}>
-            <Text style={styles.dropdownTriggerLabel}>{t('operator', 'Operator')}:</Text>
+            activeOpacity={0.8}
+          >
+            <Text style={styles.dropdownTriggerLabel}>
+              {t('operator', 'Operator')}:
+            </Text>
             <Text
               style={[
                 styles.dropdownTriggerValue,
                 selectedOperator !== 'ALL' && styles.dropdownTriggerValueActive,
               ]}
-              numberOfLines={1}>
+              numberOfLines={1}
+            >
               {operatorLabel}
             </Text>
             {activeDropdown === 'operator' ? (
@@ -967,14 +1156,18 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             onPress={() =>
               setActiveDropdown(activeDropdown === 'mode' ? null : 'mode')
             }
-            activeOpacity={0.8}>
-            <Text style={styles.dropdownTriggerLabel}>{t('test_mode', 'Test Mode')}:</Text>
+            activeOpacity={0.8}
+          >
+            <Text style={styles.dropdownTriggerLabel}>
+              {t('test_mode', 'Test Mode')}:
+            </Text>
             <Text
               style={[
                 styles.dropdownTriggerValue,
                 selectedMode !== 'ALL' && styles.dropdownTriggerValueActive,
               ]}
-              numberOfLines={1}>
+              numberOfLines={1}
+            >
               {modeLabel}
             </Text>
             {activeDropdown === 'mode' ? (
@@ -989,9 +1182,12 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             <TouchableOpacity
               style={styles.resetFilterBtn}
               onPress={resetAllFilters}
-              activeOpacity={0.7}>
+              activeOpacity={0.7}
+            >
               <CloseIcon size={13} color="#EF4444" />
-              <Text style={styles.resetFilterBtnText}>{t('reset', 'Reset')}</Text>
+              <Text style={styles.resetFilterBtnText}>
+                {t('reset', 'Reset')}
+              </Text>
             </TouchableOpacity>
           )}
         </View>
@@ -1018,12 +1214,15 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                     historyMapType === 'map' && styles.mapTypeToggleBtnActive,
                   ]}
                   onPress={() => handleToggleHistoryMapType('map')}
-                  activeOpacity={0.8}>
+                  activeOpacity={0.8}
+                >
                   <Text
                     style={[
                       styles.mapTypeToggleText,
-                      historyMapType === 'map' && styles.mapTypeToggleTextActive,
-                    ]}>
+                      historyMapType === 'map' &&
+                        styles.mapTypeToggleTextActive,
+                    ]}
+                  >
                     Map
                   </Text>
                 </TouchableOpacity>
@@ -1031,15 +1230,19 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 <TouchableOpacity
                   style={[
                     styles.mapTypeToggleBtn,
-                    historyMapType === 'satellite' && styles.mapTypeToggleBtnActive,
+                    historyMapType === 'satellite' &&
+                      styles.mapTypeToggleBtnActive,
                   ]}
                   onPress={() => handleToggleHistoryMapType('satellite')}
-                  activeOpacity={0.8}>
+                  activeOpacity={0.8}
+                >
                   <Text
                     style={[
                       styles.mapTypeToggleText,
-                      historyMapType === 'satellite' && styles.mapTypeToggleTextActive,
-                    ]}>
+                      historyMapType === 'satellite' &&
+                        styles.mapTypeToggleTextActive,
+                    ]}
+                  >
                     Satellite
                   </Text>
                 </TouchableOpacity>
@@ -1076,19 +1279,22 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               <TouchableOpacity
                 style={styles.mapControlBtn}
                 onPress={handleRecenterHistoryMap}
-                activeOpacity={0.75}>
+                activeOpacity={0.75}
+              >
                 <CrosshairIcon size={16} color="#0F172A" />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.mapControlBtn}
                 onPress={handleZoomInHistoryMap}
-                activeOpacity={0.75}>
+                activeOpacity={0.75}
+              >
                 <PlusIcon size={16} color="#0F172A" />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.mapControlBtn}
                 onPress={handleZoomOutHistoryMap}
-                activeOpacity={0.75}>
+                activeOpacity={0.75}
+              >
                 <MinusIcon size={16} color="#0F172A" />
               </TouchableOpacity>
             </View>
@@ -1117,12 +1323,19 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             {mapMarkersData.length === 0 && (
               <View style={styles.mapEmptyOverlay}>
                 <Text style={styles.emptyIcon}>🔍</Text>
-                <Text style={styles.mapEmptyTitle}>No Matching Tests Found</Text>
+                <Text style={styles.mapEmptyTitle}>
+                  No Matching Tests Found
+                </Text>
                 <Text style={styles.mapEmptySubtitle}>
                   No test records match your selected filters.
                 </Text>
-                <TouchableOpacity style={styles.emptyResetBtn} onPress={resetAllFilters}>
-                  <Text style={styles.emptyResetBtnText}>Clear All Filters</Text>
+                <TouchableOpacity
+                  style={styles.emptyResetBtn}
+                  onPress={resetAllFilters}
+                >
+                  <Text style={styles.emptyResetBtnText}>
+                    Clear All Filters
+                  </Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -1134,7 +1347,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           <View style={styles.dateHeaderRow}>
             <Text style={styles.dateHeaderText}>{latestDateLabel}</Text>
             <Text style={styles.recordCountText}>
-              {filteredSamples.length} {filteredSamples.length === 1 ? 'Record' : 'Records'}
+              {filteredSamples.length}{' '}
+              {filteredSamples.length === 1 ? 'Record' : 'Records'}
               {hasActiveFilters && ` of ${samples.length}`}
             </Text>
           </View>
@@ -1157,11 +1371,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                         },
                       ]
                     : []),
-                ]
+                ],
               );
-            }}>
+            }}
+          >
             <Text style={styles.retentionInfoText}>
-              ⏱️ Backend records auto-delete after 90 days • <Text style={styles.retentionInfoLink}>Policy Details</Text>
+              ⏱️ Backend records auto-delete after 90 days •{' '}
+              <Text style={styles.retentionInfoLink}>Policy Details</Text>
             </Text>
           </TouchableOpacity>
 
@@ -1169,7 +1385,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           {capacityInfo.isFull && (
             <View style={styles.capacityWarning}>
               <Text style={styles.capacityWarningText}>
-                ⚠️ Capacity reached ({capacityInfo.count}/{capacityInfo.maxLimit}). Auto-depleting oldest entries.
+                ⚠️ Capacity reached ({capacityInfo.count}/
+                {capacityInfo.maxLimit}). Auto-depleting oldest entries.
               </Text>
               <TouchableOpacity onPress={handleExportPrompt}>
                 <Text style={styles.capacityExportLink}>Backup</Text>
@@ -1188,8 +1405,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                   : 'Run speed, video, or coverage tests to record telemetry metrics.'}
               </Text>
               {hasActiveFilters && (
-                <TouchableOpacity style={styles.emptyResetBtn} onPress={resetAllFilters}>
-                  <Text style={styles.emptyResetBtnText}>Clear All Filters</Text>
+                <TouchableOpacity
+                  style={styles.emptyResetBtn}
+                  onPress={resetAllFilters}
+                >
+                  <Text style={styles.emptyResetBtnText}>
+                    Clear All Filters
+                  </Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -1208,21 +1430,38 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       {/* Bottom Action Footer */}
       <View style={styles.actionRow}>
         <TouchableOpacity
-          style={[styles.actionBtn, styles.exportBtn, samples.length === 0 && styles.btnDisabled]}
+          style={[
+            styles.actionBtn,
+            styles.exportBtn,
+            samples.length === 0 && styles.btnDisabled,
+          ]}
           onPress={handleExportPrompt}
-          disabled={samples.length === 0}>
-          <Text style={styles.exportBtnText}>📤 {t('export_btn', 'Export CSV/JSON')}</Text>
+          disabled={samples.length === 0}
+        >
+          <Text style={styles.exportBtnText}>
+            📤 {t('export_btn', 'Export CSV/JSON')}
+          </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.actionBtn, styles.clearBtn, samples.length === 0 && styles.btnDisabled]}
+          style={[
+            styles.actionBtn,
+            styles.clearBtn,
+            samples.length === 0 && styles.btnDisabled,
+          ]}
           onPress={handleClearHistory}
-          disabled={samples.length === 0}>
+          disabled={samples.length === 0}
+        >
           <Text style={styles.clearBtnText}>🗑 {t('clear_btn', 'Clear')}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={[styles.actionBtn, styles.refreshBtn]} onPress={onRefresh}>
-          <Text style={styles.refreshBtnText}>🔄 {t('refresh_btn', 'Refresh')}</Text>
+        <TouchableOpacity
+          style={[styles.actionBtn, styles.refreshBtn]}
+          onPress={onRefresh}
+        >
+          <Text style={styles.refreshBtnText}>
+            🔄 {t('refresh_btn', 'Refresh')}
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -1237,10 +1476,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                   activeDropdown === 'operator'
                     ? styles.dropdownCardOperator
                     : styles.dropdownCardMode,
-                ]}>
+                ]}
+              >
                 {activeDropdown === 'operator' ? (
                   <>
-                    <Text style={styles.dropdownHeaderTitle}>Filter by Operator</Text>
+                    <Text style={styles.dropdownHeaderTitle}>
+                      Filter by Operator
+                    </Text>
                     {[
                       { id: 'ALL', label: 'All Operators' },
                       { id: 'AIRTEL', label: 'Airtel' },
@@ -1257,19 +1499,24 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                             setSelectedOperator(item.id as OperatorFilter);
                             setActiveDropdown(null);
                           }}
-                          activeOpacity={0.7}>
+                          activeOpacity={0.7}
+                        >
                           <View
                             style={[
                               styles.checkboxBox,
                               isSelected && styles.checkboxBoxSelected,
-                            ]}>
-                            {isSelected && <View style={styles.checkboxInnerCheck} />}
+                            ]}
+                          >
+                            {isSelected && (
+                              <View style={styles.checkboxInnerCheck} />
+                            )}
                           </View>
                           <Text
                             style={[
                               styles.dropdownOptionText,
                               isSelected && styles.dropdownOptionTextSelected,
-                            ]}>
+                            ]}
+                          >
                             {item.label}
                           </Text>
                         </TouchableOpacity>
@@ -1278,7 +1525,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                   </>
                 ) : (
                   <>
-                    <Text style={styles.dropdownHeaderTitle}>Filter by Test Mode</Text>
+                    <Text style={styles.dropdownHeaderTitle}>
+                      Filter by Test Mode
+                    </Text>
                     {[
                       { id: 'ALL', label: 'All Modes (Wi-Fi & Mobile)' },
                       { id: 'WIFI', label: '🛜 Wi-Fi Only' },
@@ -1293,19 +1542,24 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                             setSelectedMode(item.id as ModeFilter);
                             setActiveDropdown(null);
                           }}
-                          activeOpacity={0.7}>
+                          activeOpacity={0.7}
+                        >
                           <View
                             style={[
                               styles.checkboxBox,
                               isSelected && styles.checkboxBoxSelected,
-                            ]}>
-                            {isSelected && <View style={styles.checkboxInnerCheck} />}
+                            ]}
+                          >
+                            {isSelected && (
+                              <View style={styles.checkboxInnerCheck} />
+                            )}
                           </View>
                           <Text
                             style={[
                               styles.dropdownOptionText,
                               isSelected && styles.dropdownOptionTextSelected,
-                            ]}>
+                            ]}
+                          >
                             {item.label}
                           </Text>
                         </TouchableOpacity>

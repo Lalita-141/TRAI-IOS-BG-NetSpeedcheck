@@ -75,7 +75,7 @@ const FAQ_ITEMS = [
   },
   {
     q: 'Does background monitoring exhaust mobile data?',
-    a: 'Each speed test transfers about 3 MB by default, so short test intervals use a lot of data. You can also enable "Wi-Fi Only Mode" under About Data Usage to completely prevent cellular quota consumption.',
+    a: 'Each speed test measures for about 8 seconds each way and can use up to 100 MB download and 50 MB upload on a fast connection, so short test intervals use a lot of data. You can also enable "Wi-Fi Only Mode" under About Data Usage to completely prevent cellular quota consumption.',
   },
   {
     q: 'How long are test samples stored on the server?',
@@ -378,7 +378,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
     { label: '15m', value: 900 },
     { label: '30m', value: 1800 },
   ];
-  const payloadOptions = [1, 2, 5, 10];
   const historyLimitOptions = [100, 250, 500, 1000, 2500, 5000];
 
   return (
@@ -429,7 +428,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
           <View style={styles.settingCardContent}>
             <Text style={styles.settingCardTitle}>{t('about_data_usage', 'About Data Usage')}</Text>
             <Text style={styles.settingCardSubtitle}>
-              {downloadMB}MB Down • {uploadMB}MB Up • {wifiOnly ? 'Wi-Fi Only' : 'Wi-Fi & Cellular'}
+              Up to 100MB Down • 50MB Up • {wifiOnly ? 'Wi-Fi Only' : 'Wi-Fi & Cellular'}
             </Text>
           </View>
           <ChevronRightIcon size={18} color="#94A3B8" />
@@ -696,7 +695,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
             <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
               <View style={styles.infoBanner}>
                 <Text style={styles.infoBannerText}>
-                  💡 Each automated test transmits small measurement chunk buffers to evaluate QoS without exhausting your cellular quota.
+                  💡 Each test measures for about 8 seconds each way over 4 connections, and stops early after 100 MB download or 50 MB upload. On fast connections this uses a lot of data: choose a longer interval or Wi-Fi Only Mode to limit mobile data use.
                 </Text>
               </View>
 
@@ -714,44 +713,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
                         intervalSec === opt.value && styles.pillBtnTextActive,
                       ]}>
                       {opt.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {/* Download MB */}
-              <Text style={styles.configLabel}>DOWNLOAD TEST PAYLOAD SIZE</Text>
-              <View style={styles.pillGroup}>
-                {payloadOptions.map(mb => (
-                  <TouchableOpacity
-                    key={mb}
-                    style={[styles.pillBtn, downloadMB === mb && styles.pillBtnActive]}
-                    onPress={() => setDownloadMB(mb)}>
-                    <Text
-                      style={[
-                        styles.pillBtnText,
-                        downloadMB === mb && styles.pillBtnTextActive,
-                      ]}>
-                      {mb} MB
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {/* Upload MB */}
-              <Text style={styles.configLabel}>UPLOAD TEST PAYLOAD SIZE</Text>
-              <View style={styles.pillGroup}>
-                {payloadOptions.slice(0, 3).map(mb => (
-                  <TouchableOpacity
-                    key={mb}
-                    style={[styles.pillBtn, uploadMB === mb && styles.pillBtnActive]}
-                    onPress={() => setUploadMB(mb)}>
-                    <Text
-                      style={[
-                        styles.pillBtnText,
-                        uploadMB === mb && styles.pillBtnTextActive,
-                      ]}>
-                      {mb} MB
                     </Text>
                   </TouchableOpacity>
                 ))}

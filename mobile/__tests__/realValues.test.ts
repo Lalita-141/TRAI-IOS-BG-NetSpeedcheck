@@ -32,9 +32,48 @@ const offlineFetch = jest.fn(async () => {
 });
 const netInfoFetch = NetInfo.fetch as unknown as jest.Mock;
 
+/** XMLHttpRequest stand-in: each request is answered by `respond`, or fails when it returns null. */
+function fakeXhr(respond: (url: string) => { status: number; size: number } | null) {
+  return class {
+    status = 0;
+    readyState = 0;
+    response: any = null;
+    responseType = '';
+    timeout = 0;
+    onreadystatechange: any = null;
+    onprogress: any = null;
+    onload: any = null;
+    onerror: any = null;
+    ontimeout: any = null;
+    upload: any = {};
+    private url = '';
+    open(_method: string, url: string) {
+      this.url = url;
+    }
+    setRequestHeader() {}
+    abort() {}
+    send() {
+      setTimeout(() => {
+        const r = respond(this.url);
+        if (!r) {
+          this.onerror?.();
+          return;
+        }
+        this.status = r.status;
+        this.readyState = 2;
+        this.onreadystatechange?.();
+        this.response = { size: r.size };
+        this.readyState = 4;
+        this.onload?.();
+      }, 1);
+    }
+  };
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
   (global as any).fetch = offlineFetch;
+  (global as any).XMLHttpRequest = fakeXhr(() => null);
   jest.spyOn(uploader, 'flush').mockResolvedValue({ uploadedCount: 0, remainingPending: 0, success: true });
   jest.spyOn(sampleStore, 'add').mockResolvedValue();
   delete NativeModules.TelephonyModule;
@@ -99,10 +138,7 @@ describe('nothing is invented when a value cannot be measured', () => {
 
   it('a video & browser test saves only what it measured', async () => {
     netInfoFetch.mockResolvedValue({ type: 'wifi', isConnected: true, details: null });
-    (global as any).fetch = jest.fn(async (url: string) => {
-      if (url.includes('ipwho.is')) throw new Error('offline');
-      return { ok: true, blob: async () => ({ size: url.includes('test-video') ? 2000000 : 200 }) };
-    });
+    (global as any).XMLHttpRequest = fakeXhr(url => ({ status: 200, size: url.includes('test-video') ? 2000000 : 200 }));
     const { results, sample } = await runVideoBrowserTest();
     expect(results.videoDelayMs).not.toBeNull();
     expect(results.pageLoadSec).not.toBeNull();
@@ -113,8 +149,8 @@ describe('nothing is invented when a value cannot be measured', () => {
   });
 
   it('download speed is not assumed from the requested size', async () => {
-    (global as any).fetch = jest.fn(async () => ({ ok: true, blob: async () => ({ size: 0 }) }));
-    await expect(speedTester.measureDownload('https://x', 2)).resolves.toBeNull();
+    (global as any).XMLHttpRequest = fakeXhr(() => ({ status: 200, size: 0 }));
+    await expect(speedTester.measureDownload('https://x')).resolves.toBeNull();
   });
 
   it('place names come only from the geocoder, otherwise real coordinates', async () => {

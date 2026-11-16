@@ -236,7 +236,9 @@ class ContinuousTestService {
         if (!this.isCurrent(sessionId)) return;
 
         if (outcome) {
-          this.setState({ cycles: [outcome.cycle, ...this.state.cycles] });
+          // The cycle keeps its full result so the results screen can show every measured value
+          const cycle: CycleResult = { ...outcome.cycle, sample: outcome.sample };
+          this.setState({ cycles: [cycle, ...this.state.cycles] });
           this.persist();
           if (outcome.sample) {
             // Don't block the loop on storage / network

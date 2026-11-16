@@ -16,6 +16,7 @@ import {
   displayRadio,
   displaySignal,
   useTestServerHost,
+  sampleKind,
 } from '../utils/sampleDisplay';
 import { useTranslation } from '../i18n';
 import {
@@ -30,6 +31,7 @@ import {
   ServerIcon,
   PinIcon,
   ShareAppIcon,
+  VideoBrowserTestIcon,
   CrosshairIcon,
   PlusIcon,
   MinusIcon,
@@ -47,7 +49,9 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
   onBack,
 }) => {
   const { t } = useTranslation();
-  const [locationName, setLocationName] = useState<string>('Resolving location...');
+  const [locationName, setLocationName] = useState<string>(
+    'Resolving location...',
+  );
   const [mapType, setMapType] = useState<'map' | 'satellite'>('map');
   const webViewRef = useRef<any>(null);
 
@@ -81,11 +85,81 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
     hour12: true,
   });
 
-  const downSpeed = sample.down_mbps != null ? sample.down_mbps.toFixed(1) : NOT_MEASURED;
-  const upSpeed = sample.up_mbps != null ? sample.up_mbps.toFixed(1) : NOT_MEASURED;
-  const latency = sample.latency_ms != null ? Math.round(sample.latency_ms) : NOT_MEASURED;
-  const packetLoss = sample.packet_loss_pct != null ? `${sample.packet_loss_pct}%` : NOT_MEASURED;
-  const jitter = sample.jitter_ms != null ? `${sample.jitter_ms.toFixed(2)} ms` : NOT_MEASURED;
+  const downSpeed =
+    sample.down_mbps != null ? sample.down_mbps.toFixed(1) : NOT_MEASURED;
+  const upSpeed =
+    sample.up_mbps != null ? sample.up_mbps.toFixed(1) : NOT_MEASURED;
+  const latency =
+    sample.latency_ms != null ? Math.round(sample.latency_ms) : NOT_MEASURED;
+  const packetLoss =
+    sample.packet_loss_pct != null
+      ? `${sample.packet_loss_pct}%`
+      : NOT_MEASURED;
+  const jitter =
+    sample.jitter_ms != null
+      ? `${sample.jitter_ms.toFixed(2)} ms`
+      : NOT_MEASURED;
+
+  // A video & browser test has no upload, packet loss or jitter: show its own values instead
+  // (same layout as the Video & Browser Test Result screen).
+  const kind = sampleKind(sample);
+  const isVideo = kind === 'video';
+  const showHeroTop = kind !== 'coverage'; // a coverage cycle has no download/upload
+  const videoDelay =
+    sample.video_delay_ms != null
+      ? Math.round(sample.video_delay_ms)
+      : NOT_MEASURED;
+  const webDelay =
+    sample.web_delay_ms != null
+      ? Math.round(sample.web_delay_ms)
+      : NOT_MEASURED;
+  const ttfbValue = sample.ttfb_ms ?? sample.latency_ms;
+  const ttfb = ttfbValue != null ? `${Math.round(ttfbValue)} ms` : NOT_MEASURED;
+  const videoSpeed =
+    sample.down_mbps != null
+      ? `${sample.down_mbps.toFixed(2)} Mbps`
+      : NOT_MEASURED;
+  const streamingQuality = sample.streaming_quality || NOT_MEASURED;
+  const heroTop = isVideo
+    ? [
+        {
+          value: videoDelay,
+          unit: 'ms',
+          label: 'Video Delay',
+          icon: <VideoBrowserTestIcon size={14} color="#0284C7" />,
+        },
+        {
+          value: webDelay,
+          unit: 'ms',
+          label: 'Web Delay',
+          icon: <GlobeIcon size={14} color="#7C3AED" />,
+        },
+      ]
+    : [
+        {
+          value: downSpeed,
+          unit: 'Mbps',
+          label: t('download_speed', 'Download Speed'),
+          icon: <DownloadIcon size={14} color="#0284C7" />,
+        },
+        {
+          value: upSpeed,
+          unit: 'Mbps',
+          label: t('upload_speed', 'Upload Speed'),
+          icon: <UploadIcon size={14} color="#7C3AED" />,
+        },
+      ];
+  const heroBottom = isVideo
+    ? [
+        { label: 'Streaming Quality', value: streamingQuality },
+        { label: 'Video Speed', value: videoSpeed },
+        { label: 'HTTP TTFB', value: ttfb },
+      ]
+    : [
+        { label: t('ping', 'Latency'), value: `${latency} ms` },
+        { label: t('packet_loss', 'Packet Loss'), value: packetLoss },
+        { label: t('jitter', 'Jitter'), value: jitter },
+      ];
 
   const carrier = displayCarrier(sample);
   const radio = displayRadio(sample);
@@ -96,7 +170,12 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
 
   const handleShare = async () => {
     try {
-      const msg = `NetSpeed QoS Test Result:\n• Download: ${downSpeed} Mbps\n• Upload: ${upSpeed} Mbps\n• Ping: ${latency} ms\n• Operator: ${carrier} (${radio})\n• Date: ${formattedDate} at ${formattedTime}\n• Location: ${locationName}`;
+      const values = isVideo
+        ? `• Video Delay: ${videoDelay} ms\n• Web Delay: ${webDelay} ms\n• Streaming Quality: ${streamingQuality}\n• Video Speed: ${videoSpeed}\n• HTTP TTFB: ${ttfb}\n`
+        : !showHeroTop
+        ? `• Latency: ${latency} ms\n• Packet Loss: ${packetLoss}\n• Jitter: ${jitter}\n`
+        : `• Download: ${downSpeed} Mbps\n• Upload: ${upSpeed} Mbps\n• Ping: ${latency} ms\n`;
+      const msg = `NetSpeed QoS Test Result:\n${values}• Operator: ${carrier} (${radio})\n• Date: ${formattedDate} at ${formattedTime}\n• Location: ${locationName}`;
       await Share.share({
         message: msg,
         title: 'NetSpeed Test Result',
@@ -108,25 +187,40 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
 
   const handleToggleMapType = (type: 'map' | 'satellite') => {
     setMapType(type);
-    webViewRef.current?.injectJavaScript(`if (window.setMapType) { window.setMapType('${type}'); } true;`);
+    webViewRef.current?.injectJavaScript(
+      `if (window.setMapType) { window.setMapType('${type}'); } true;`,
+    );
   };
 
   const handleRecenter = () => {
-    webViewRef.current?.injectJavaScript(`if (window.recenterMap) { window.recenterMap(); } true;`);
+    webViewRef.current?.injectJavaScript(
+      `if (window.recenterMap) { window.recenterMap(); } true;`,
+    );
   };
 
   const handleZoomIn = () => {
-    webViewRef.current?.injectJavaScript('if (window.zoomInMap) { window.zoomInMap(); } true;');
+    webViewRef.current?.injectJavaScript(
+      'if (window.zoomInMap) { window.zoomInMap(); } true;',
+    );
   };
 
   const handleZoomOut = () => {
-    webViewRef.current?.injectJavaScript('if (window.zoomOutMap) { window.zoomOutMap(); } true;');
+    webViewRef.current?.injectJavaScript(
+      'if (window.zoomOutMap) { window.zoomOutMap(); } true;',
+    );
   };
 
   // Generate Leaflet Map HTML centered on this single test sample
   const mapHtml = useMemo(() => {
     const down = sample.down_mbps;
-    const color = down == null ? '#94A3B8' : down >= 25 ? '#00A389' : down >= 10 ? '#F59E0B' : '#EF4444';
+    const color =
+      down == null
+        ? '#94A3B8'
+        : down >= 25
+        ? '#00A389'
+        : down >= 10
+        ? '#F59E0B'
+        : '#EF4444';
     const accuracyRadius = sample.accuracy ?? 0;
     const speedText = downSpeed;
 
@@ -255,10 +349,23 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
     });
 
     var popupHtml = '<div class="pop-title">${carrier} • ${radio}</div>' +
-                    '<div class="pop-sub">${locationName.replace(/'/g, "\\'")}</div>' +
-                    '<div class="pop-stat-row"><span>Download</span><span class="pop-stat-val">${downSpeed} Mbps</span></div>' +
+                    '<div class="pop-sub">${locationName.replace(
+                      /'/g,
+                      "\\'",
+                    )}</div>' +
+                    ${
+                      isVideo
+                        ? `'<div class="pop-stat-row"><span>Video Delay</span><span class="pop-stat-val">${videoDelay} ms</span></div>' +
+                    '<div class="pop-stat-row"><span>Web Delay</span><span class="pop-stat-val">${webDelay} ms</span></div>' +
+                    '<div class="pop-stat-row"><span>Video Speed</span><span>${videoSpeed}</span></div>';`
+                        : !showHeroTop
+                        ? `'<div class="pop-stat-row"><span>Latency</span><span class="pop-stat-val">${latency} ms</span></div>' +
+                    '<div class="pop-stat-row"><span>Packet Loss</span><span class="pop-stat-val">${packetLoss}</span></div>' +
+                    '<div class="pop-stat-row"><span>Jitter</span><span>${jitter}</span></div>';`
+                        : `'<div class="pop-stat-row"><span>Download</span><span class="pop-stat-val">${downSpeed} Mbps</span></div>' +
                     '<div class="pop-stat-row"><span>Upload</span><span class="pop-stat-val">${upSpeed} Mbps</span></div>' +
-                    '<div class="pop-stat-row"><span>Ping</span><span>${latency} ms</span></div>';
+                    '<div class="pop-stat-row"><span>Ping</span><span>${latency} ms</span></div>';`
+                    }
 
     var marker = L.marker([${lat}, ${lng}], { icon: pinIcon }).addTo(map);
     marker.bindPopup(popupHtml, { maxWidth: 220, closeButton: false }).openPopup();
@@ -293,18 +400,46 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
 </body>
 </html>
     `;
-  }, [lat, lng, sample.down_mbps, sample.accuracy, downSpeed, upSpeed, latency, carrier, radio, locationName]);
+  }, [
+    lat,
+    lng,
+    sample.down_mbps,
+    sample.accuracy,
+    downSpeed,
+    upSpeed,
+    latency,
+    carrier,
+    radio,
+    locationName,
+    isVideo,
+    showHeroTop,
+    packetLoss,
+    jitter,
+    videoDelay,
+    webDelay,
+    videoSpeed,
+  ]);
 
   return (
     <View style={styles.container}>
       {/* Top Header Row with Back Button */}
       <View style={styles.headerRow}>
-        <TouchableOpacity style={styles.backBtn} onPress={onBack} activeOpacity={0.75}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={onBack}
+          activeOpacity={0.75}
+        >
           <BackArrowIcon size={20} color="#0F172A" />
-          <Text style={styles.backBtnText}>{t('back_to_history', 'Back to History')}</Text>
+          <Text style={styles.backBtnText}>
+            {t('back_to_history', 'Back to History')}
+          </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.shareIconBtn} onPress={handleShare} activeOpacity={0.75}>
+        <TouchableOpacity
+          style={styles.shareIconBtn}
+          onPress={handleShare}
+          activeOpacity={0.75}
+        >
           <ShareAppIcon size={18} color="#00A389" />
         </TouchableOpacity>
       </View>
@@ -312,76 +447,64 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}>
-
+        showsVerticalScrollIndicator={false}
+      >
         {/* 1. TOP HERO SPEED CARD (Matching User Mockup) */}
         <View style={styles.heroCard}>
-          {/* Top Row: Download & Upload side-by-side */}
-          <View style={styles.heroTopRow}>
-            {/* Download Column */}
-            <View style={styles.heroCol}>
-              <View style={styles.valueWithUnitRow}>
-                <Text style={styles.heroLargeValue}>{downSpeed}</Text>
-                <Text style={styles.heroUnitText}>Mbps</Text>
+          {showHeroTop ? (
+            <>
+              {/* Top Row: Download & Upload (video test: Video Delay & Web Delay) */}
+              <View style={styles.heroTopRow}>
+                {heroTop.map((item, i) => (
+                  <React.Fragment key={item.label}>
+                    {i > 0 ? <View style={styles.heroVerticalDivider} /> : null}
+                    <View style={styles.heroCol}>
+                      <View style={styles.valueWithUnitRow}>
+                        <Text style={styles.heroLargeValue}>{item.value}</Text>
+                        <Text style={styles.heroUnitText}>{item.unit}</Text>
+                      </View>
+                      <View style={styles.heroLabelRow}>
+                        <Text style={styles.heroLabelText}>{item.label}</Text>
+                        {item.icon}
+                      </View>
+                    </View>
+                  </React.Fragment>
+                ))}
               </View>
-              <View style={styles.heroLabelRow}>
-                <Text style={styles.heroLabelText}>{t('download_speed', 'Download Speed')}</Text>
-                <DownloadIcon size={14} color="#0284C7" />
-              </View>
-            </View>
 
-            {/* Vertical Divider */}
-            <View style={styles.heroVerticalDivider} />
+              {/* Horizontal Divider */}
+              <View style={styles.heroHorizontalDivider} />
+            </>
+          ) : null}
 
-            {/* Upload Column */}
-            <View style={styles.heroCol}>
-              <View style={styles.valueWithUnitRow}>
-                <Text style={styles.heroLargeValue}>{upSpeed}</Text>
-                <Text style={styles.heroUnitText}>Mbps</Text>
-              </View>
-              <View style={styles.heroLabelRow}>
-                <Text style={styles.heroLabelText}>{t('upload_speed', 'Upload Speed')}</Text>
-                <UploadIcon size={14} color="#7C3AED" />
-              </View>
-            </View>
-          </View>
-
-          {/* Horizontal Divider */}
-          <View style={styles.heroHorizontalDivider} />
-
-          {/* Bottom Row: 3 Metrics (Latency | Packet Loss | Jitter) */}
+          {/* Bottom Row: Latency | Packet Loss | Jitter (video test: Streaming Quality | Video Speed | TTFB) */}
           <View style={styles.heroBottomRow}>
-            <View style={styles.heroMetricCol}>
-              <Text style={styles.metricSubLabel}>{t('ping', 'Latency')}</Text>
-              <Text style={styles.metricMainValue}>{latency} ms</Text>
-            </View>
-
-            <View style={styles.heroMetricDivider} />
-
-            <View style={styles.heroMetricCol}>
-              <Text style={styles.metricSubLabel}>{t('packet_loss', 'Packet Loss')}</Text>
-              <Text style={styles.metricMainValue}>{packetLoss}</Text>
-            </View>
-
-            <View style={styles.heroMetricDivider} />
-
-            <View style={styles.heroMetricCol}>
-              <Text style={styles.metricSubLabel}>{t('jitter', 'Jitter')}</Text>
-              <Text style={styles.metricMainValue}>{jitter}</Text>
-            </View>
+            {heroBottom.map((item, i) => (
+              <React.Fragment key={item.label}>
+                {i > 0 ? <View style={styles.heroMetricDivider} /> : null}
+                <View style={styles.heroMetricCol}>
+                  <Text style={styles.metricSubLabel}>{item.label}</Text>
+                  <Text style={styles.metricMainValue}>{item.value}</Text>
+                </View>
+              </React.Fragment>
+            ))}
           </View>
         </View>
 
         {/* 2. TEST DETAILS CARD (Matching User Mockup) */}
         <View style={styles.detailsCard}>
-          <Text style={styles.detailsCardTitle}>{t('test_details_title', 'Test Details')}</Text>
+          <Text style={styles.detailsCardTitle}>
+            {t('test_details_title', 'Test Details')}
+          </Text>
 
           {/* Row 1: Coverage | Tech | Operator */}
           <View style={styles.gridThreeColRow}>
             <View style={styles.gridCol}>
               <View style={styles.fieldHeaderRow}>
                 <CoverageTestIcon size={15} color="#64748B" />
-                <Text style={styles.fieldHeaderLabel}>{t('filter_coverage', 'Coverage')}</Text>
+                <Text style={styles.fieldHeaderLabel}>
+                  {t('filter_coverage', 'Coverage')}
+                </Text>
               </View>
               <Text style={styles.fieldBoldValue}>{coverage}</Text>
             </View>
@@ -397,7 +520,9 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
             <View style={styles.gridCol}>
               <View style={styles.fieldHeaderRow}>
                 <GlobeIcon size={15} color="#64748B" />
-                <Text style={styles.fieldHeaderLabel}>{t('operator', 'Operator')}</Text>
+                <Text style={styles.fieldHeaderLabel}>
+                  {t('operator', 'Operator')}
+                </Text>
               </View>
               <Text style={styles.fieldBoldValue}>{carrier}</Text>
             </View>
@@ -426,7 +551,9 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
             <View style={styles.gridCol}>
               <View style={styles.fieldHeaderRow}>
                 <Text style={styles.fieldDocEmoji}>📄</Text>
-                <Text style={styles.fieldHeaderLabel}>{t('test_id', 'Test ID')}</Text>
+                <Text style={styles.fieldHeaderLabel}>
+                  {t('test_id', 'Test ID')}
+                </Text>
               </View>
               <Text style={styles.fieldBoldValue}>{shortTestId}</Text>
             </View>
@@ -438,7 +565,9 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
           <View style={styles.fieldFullBlock}>
             <View style={styles.fieldHeaderRow}>
               <ServerIcon size={15} color="#64748B" />
-              <Text style={styles.fieldHeaderLabel}>{t('test_server', 'Test Server')}</Text>
+              <Text style={styles.fieldHeaderLabel}>
+                {t('test_server', 'Test Server')}
+              </Text>
             </View>
             <Text style={styles.fieldBoldValue}>{serverDisplay}</Text>
           </View>
@@ -449,7 +578,9 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
           <View style={styles.fieldFullBlock}>
             <View style={styles.fieldHeaderRow}>
               <PinIcon size={15} color="#0284C7" />
-              <Text style={styles.fieldHeaderLabel}>{t('location', 'Location')}</Text>
+              <Text style={styles.fieldHeaderLabel}>
+                {t('location', 'Location')}
+              </Text>
             </View>
             <Text style={styles.locationTitleText}>{locationName}</Text>
             {lat != null && lng != null ? (
@@ -462,81 +593,125 @@ export const HistoryTestDetailView: React.FC<HistoryTestDetailViewProps> = ({
 
         {/* 3. TEST LOCATION MAP: only when this test really has a GPS position */}
         {lat != null && lng != null ? (
-        <View style={styles.mapCard}>
-          <View style={styles.mapCardHeaderRow}>
-            <View style={styles.mapTitleLeft}>
-              <MapPinIcon size={16} color="#00A389" />
-              <Text style={styles.mapCardTitle}>{t('test_location_map', 'Test Location Map')}</Text>
-            </View>
-
-            {/* Map / Satellite Toggle */}
-            <View style={styles.mapTypeToggle}>
-              <TouchableOpacity
-                style={[styles.mapToggleBtn, mapType === 'map' && styles.mapToggleBtnActive]}
-                onPress={() => handleToggleMapType('map')}
-                activeOpacity={0.8}>
-                <Text style={[styles.mapToggleText, mapType === 'map' && styles.mapToggleTextActive]}>
-                  {t('tab_map', 'Map')}
+          <View style={styles.mapCard}>
+            <View style={styles.mapCardHeaderRow}>
+              <View style={styles.mapTitleLeft}>
+                <MapPinIcon size={16} color="#00A389" />
+                <Text style={styles.mapCardTitle}>
+                  {t('test_location_map', 'Test Location Map')}
                 </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.mapToggleBtn, mapType === 'satellite' && styles.mapToggleBtnActive]}
-                onPress={() => handleToggleMapType('satellite')}
-                activeOpacity={0.8}>
-                <Text style={[styles.mapToggleText, mapType === 'satellite' && styles.mapToggleTextActive]}>
-                  Satellite
-                </Text>
-              </TouchableOpacity>
+              </View>
+
+              {/* Map / Satellite Toggle */}
+              <View style={styles.mapTypeToggle}>
+                <TouchableOpacity
+                  style={[
+                    styles.mapToggleBtn,
+                    mapType === 'map' && styles.mapToggleBtnActive,
+                  ]}
+                  onPress={() => handleToggleMapType('map')}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={[
+                      styles.mapToggleText,
+                      mapType === 'map' && styles.mapToggleTextActive,
+                    ]}
+                  >
+                    {t('tab_map', 'Map')}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.mapToggleBtn,
+                    mapType === 'satellite' && styles.mapToggleBtnActive,
+                  ]}
+                  onPress={() => handleToggleMapType('satellite')}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={[
+                      styles.mapToggleText,
+                      mapType === 'satellite' && styles.mapToggleTextActive,
+                    ]}
+                  >
+                    Satellite
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Map Container with Overlay Controls */}
+            <View style={styles.mapContainer}>
+              <WebView
+                ref={webViewRef}
+                source={{ html: mapHtml }}
+                style={styles.mapWebView}
+                originWhitelist={['*']}
+                javaScriptEnabled={true}
+                domStorageEnabled={true}
+                scrollEnabled={false}
+                bounces={false}
+              />
+
+              {/* Floating Action Buttons */}
+              <View style={styles.mapFloatingControls}>
+                <TouchableOpacity
+                  style={styles.mapControlBtn}
+                  onPress={handleRecenter}
+                  activeOpacity={0.8}
+                >
+                  <CrosshairIcon size={16} color="#0F172A" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.mapControlBtn}
+                  onPress={handleZoomIn}
+                  activeOpacity={0.8}
+                >
+                  <PlusIcon size={16} color="#0F172A" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.mapControlBtn}
+                  onPress={handleZoomOut}
+                  activeOpacity={0.8}
+                >
+                  <MinusIcon size={16} color="#0F172A" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={styles.mapFooterNote}>
+              <Text style={styles.mapFooterNoteText}>
+                📍 Coordinates: {lat.toFixed(4)}, {lng.toFixed(4)} • Pin shows{' '}
+                {downSpeed} Mbps down
+              </Text>
             </View>
           </View>
-
-          {/* Map Container with Overlay Controls */}
-          <View style={styles.mapContainer}>
-            <WebView
-              ref={webViewRef}
-              source={{ html: mapHtml }}
-              style={styles.mapWebView}
-              originWhitelist={['*']}
-              javaScriptEnabled={true}
-              domStorageEnabled={true}
-              scrollEnabled={false}
-              bounces={false}
-            />
-
-            {/* Floating Action Buttons */}
-            <View style={styles.mapFloatingControls}>
-              <TouchableOpacity style={styles.mapControlBtn} onPress={handleRecenter} activeOpacity={0.8}>
-                <CrosshairIcon size={16} color="#0F172A" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.mapControlBtn} onPress={handleZoomIn} activeOpacity={0.8}>
-                <PlusIcon size={16} color="#0F172A" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.mapControlBtn} onPress={handleZoomOut} activeOpacity={0.8}>
-                <MinusIcon size={16} color="#0F172A" />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <View style={styles.mapFooterNote}>
-            <Text style={styles.mapFooterNoteText}>
-              📍 Coordinates: {lat.toFixed(4)}, {lng.toFixed(4)} • Pin shows {downSpeed} Mbps down
-            </Text>
-          </View>
-        </View>
         ) : null}
 
         {/* 4. BOTTOM ACTION BUTTONS */}
         <View style={styles.bottomButtonsRow}>
-          <TouchableOpacity style={styles.primaryShareBtn} onPress={handleShare} activeOpacity={0.85}>
+          <TouchableOpacity
+            style={styles.primaryShareBtn}
+            onPress={handleShare}
+            activeOpacity={0.85}
+          >
             <ShareAppIcon size={18} color="#FFFFFF" />
-            <Text style={styles.primaryShareBtnText}>{t('share_result', 'Share Result')}</Text>
+            <Text style={styles.primaryShareBtnText}>
+              {t('share_result', 'Share Result')}
+            </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.secondaryBackBtn} onPress={onBack} activeOpacity={0.8}>
-            <Text style={styles.secondaryBackBtnText}>{t('back_to_history', 'Back to History')}</Text>
+          <TouchableOpacity
+            style={styles.secondaryBackBtn}
+            onPress={onBack}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.secondaryBackBtnText}>
+              {t('back_to_history', 'Back to History')}
+            </Text>
           </TouchableOpacity>
         </View>
-
       </ScrollView>
     </View>
   );
