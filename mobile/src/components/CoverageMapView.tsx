@@ -1,4 +1,10 @@
-import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import React, {
+  useState,
+  useMemo,
+  useRef,
+  useCallback,
+  useEffect,
+} from 'react';
 import {
   View,
   Text,
@@ -11,6 +17,13 @@ import {
 import { WebView } from 'react-native-webview';
 import { Sample } from '../types';
 import { getConfig } from '../config';
+import {
+  MAP_TEST_LIMIT,
+  MapBounds,
+  mapQueryParams,
+  needsMapFetch,
+  parseBounds,
+} from '../utils/mapArea';
 import {
   SearchIcon,
   ChevronDownIcon,
@@ -34,9 +47,21 @@ type OperatorType = 'All' | 'Airtel' | 'BSNL & MTNL' | 'Jio' | 'Vi' | 'WIFI';
 type DropdownType = 'metric' | 'technology' | 'operator' | null;
 type MapType = 'map' | 'satellite';
 
-const METRIC_OPTIONS: MetricType[] = ['Coverage', 'Download', 'Upload', 'Latency'];
+const METRIC_OPTIONS: MetricType[] = [
+  'Coverage',
+  'Download',
+  'Upload',
+  'Latency',
+];
 const TECH_OPTIONS: TechnologyType[] = ['All', '5G', '4G', '2G'];
-const OPERATOR_OPTIONS: OperatorType[] = ['All', 'Airtel', 'BSNL & MTNL', 'Jio', 'Vi', 'WIFI'];
+const OPERATOR_OPTIONS: OperatorType[] = [
+  'All',
+  'Airtel',
+  'BSNL & MTNL',
+  'Jio',
+  'Vi',
+  'WIFI',
+];
 
 // Common city centers for zero-latency instant jump
 const PRESET_CITIES: Record<string, { lat: number; lng: number }> = {
@@ -74,6 +99,21 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
   const [mapType, setMapType] = useState<MapType>('map');
   const [isSearching, setIsSearching] = useState(false);
   const [crowdsourcedSamples, setCrowdsourcedSamples] = useState<any[]>([]);
+  // Area on screen: tests are loaded for this area (with a margin) instead of the newest from anywhere
+  const loadBoundsRef = useRef<MapBounds | null>(null); // visible area + margin, sent with each request
+  const lastLoadRef = useRef<{
+    key: string;
+    bounds: MapBounds;
+    complete: boolean;
+  } | null>(null);
+  const requestIdRef = useRef(0); // only the newest request may update the map
+  const crowdRef = useRef<any[]>([]); // latest server tests, used when the map page is rebuilt
+  const viewRef = useRef<{
+    forCenter: string;
+    lat: number;
+    lng: number;
+    zoom: number;
+  } | null>(null);
   const [isLiveLoading, setIsLiveLoading] = useState(false);
 
   // Fetch live crowdsourced samples from backend MySQL DB (/v1/crowdsource/map)
@@ -81,7 +121,7 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
     async (
       operator: OperatorType = selectedOperator,
       tech: TechnologyType = selectedTech,
-      metric: MetricType = selectedMetric
+      metric: MetricType = selectedMetric,
     ) => {
       try {
         setIsLiveLoading(true);
@@ -95,20 +135,32 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
             ? 'wifi'
             : operator;
 
-        const params = new URLSearchParams({
-          operator: opQuery,
-          technology: tech,
-          metric: metric,
-          limit: '1000',
-        });
+        const requestId = ++requestIdRef.current;
+        const bounds = loadBoundsRef.current;
+        const params = new URLSearchParams(
+          mapQueryParams(
+            { operator: opQuery, technology: tech, metric: metric },
+            bounds,
+          ),
+        );
 
-        const res = await fetch(`${serverUrl}/v1/crowdsource/map?${params.toString()}`, {
-          headers: { Accept: 'application/json' },
-        });
+        const res = await fetch(
+          `${serverUrl}/v1/crowdsource/map?${params.toString()}`,
+          {
+            headers: { Accept: 'application/json' },
+          },
+        );
 
         if (res.ok) {
           const data = await res.json();
-          if (Array.isArray(data)) {
+          if (Array.isArray(data) && requestId === requestIdRef.current) {
+            lastLoadRef.current = bounds
+              ? {
+                  key: `${operator}|${tech}|${metric}`,
+                  bounds,
+                  complete: data.length < MAP_TEST_LIMIT,
+                }
+              : null;
             const mapped = data.map((d: any) => ({
               id: d.id,
               lat: d.lat,
@@ -125,23 +177,27 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
               color: d.color,
               isCrowdsourced: true,
             }));
+            crowdRef.current = mapped;
             setCrowdsourcedSamples(mapped);
 
             // Dynamically inject into WebView without reloading
             webViewRef.current?.injectJavaScript(
               `if (window.updateCrowdsourceSamples) { window.updateCrowdsourceSamples(${JSON.stringify(
-                mapped
-              )}); } true;`
+                mapped,
+              )}); } true;`,
             );
           }
         }
       } catch (err) {
-        console.warn('[CoverageMapView] Failed to fetch live crowdsourced map points:', err);
+        console.warn(
+          '[CoverageMapView] Failed to fetch live crowdsourced map points:',
+          err,
+        );
       } finally {
         setIsLiveLoading(false);
       }
     },
-    [selectedOperator, selectedTech, selectedMetric]
+    [selectedOperator, selectedTech, selectedMetric],
   );
 
   // Fetch live crowdsource points on mount
@@ -179,15 +235,57 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
           tech: s.radio ?? null,
           ts: s.ts,
         })),
-    [samples]
+    [samples],
   );
 
-  // Combine local device test samples with server crowdsourced test samples
-  const allSamples = useMemo(() => {
-    // This device's tests are on the server too: don't count them twice
+  // Tests written into the map page when it is (re)built. Server tests are read from a ref, so new
+  // ones are added to the open map (updateCrowdsourceSamples) without rebuilding it and losing the view.
+  const initialMapSamples = useMemo(() => {
     const localIds = new Set(validSamples.map(s => s.id));
-    return [...validSamples, ...crowdsourcedSamples.filter(s => !localIds.has(s.id))];
-  }, [validSamples, crowdsourcedSamples]);
+    return [
+      ...validSamples,
+      ...crowdRef.current.filter(s => !localIds.has(s.id)),
+    ];
+  }, [validSamples]);
+
+  // The map page reports the area on screen after each pan / zoom
+  const handleMapMessage = useCallback(
+    (event: { nativeEvent: { data: string } }) => {
+      let msg: any;
+      try {
+        msg = JSON.parse(event.nativeEvent.data);
+      } catch {
+        return;
+      }
+      if (msg?.type !== 'bounds') return;
+      const visible = parseBounds(msg.visible);
+      const load = parseBounds(msg.load);
+      if (!visible || !load) return;
+      if (
+        typeof msg.lat === 'number' &&
+        typeof msg.lng === 'number' &&
+        typeof msg.zoom === 'number'
+      ) {
+        viewRef.current = {
+          forCenter: `${defaultCenter.lat},${defaultCenter.lng}`,
+          lat: msg.lat,
+          lng: msg.lng,
+          zoom: msg.zoom,
+        };
+      }
+      const key = `${selectedOperator}|${selectedTech}|${selectedMetric}`;
+      if (!needsMapFetch(lastLoadRef.current, key, visible)) return;
+      loadBoundsRef.current = load;
+      fetchCrowdsourcedData();
+    },
+    [
+      fetchCrowdsourcedData,
+      selectedOperator,
+      selectedTech,
+      selectedMetric,
+      defaultCenter,
+    ],
+  );
 
   // Handle Search Location
   const handleSearch = useCallback(async () => {
@@ -197,7 +295,9 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
     // Check presets first
     if (PRESET_CITIES[query]) {
       const { lat, lng } = PRESET_CITIES[query];
-      webViewRef.current?.injectJavaScript(`window.flyToLocation(${lat}, ${lng}, 12); true;`);
+      webViewRef.current?.injectJavaScript(
+        `window.flyToLocation(${lat}, ${lng}, 12); true;`,
+      );
       return;
     }
 
@@ -208,13 +308,15 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
       const serverUrl = config.serverUrl.replace(/\/+$/, '');
       const response = await fetch(
         `${serverUrl}/v1/locations/search?q=${encodeURIComponent(searchQuery)}`,
-        { headers: { Accept: 'application/json' } }
+        { headers: { Accept: 'application/json' } },
       );
       if (response.ok) {
         const results = await response.json();
         if (Array.isArray(results) && results.length > 0) {
           const { lat, lng: lon } = results[0];
-          webViewRef.current?.injectJavaScript(`window.flyToLocation(${lat}, ${lon}, 12); true;`);
+          webViewRef.current?.injectJavaScript(
+            `window.flyToLocation(${lat}, ${lon}, 12); true;`,
+          );
           return;
         }
       }
@@ -225,19 +327,21 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
     try {
       const response = await fetch(
         `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
-          searchQuery
+          searchQuery,
         )}&countrycodes=in&limit=1`,
         {
           headers: {
             'User-Agent': 'TraiNetSpeedcheckApp/1.0',
           },
-        }
+        },
       );
       const data = await response.json();
       if (data && data.length > 0) {
         const lat = parseFloat(data[0].lat);
         const lon = parseFloat(data[0].lon);
-        webViewRef.current?.injectJavaScript(`window.flyToLocation(${lat}, ${lon}, 12); true;`);
+        webViewRef.current?.injectJavaScript(
+          `window.flyToLocation(${lat}, ${lon}, 12); true;`,
+        );
       }
     } catch {
       // ignore
@@ -255,7 +359,7 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
   // Handle Map Controls
   const handleRecenter = () => {
     webViewRef.current?.injectJavaScript(
-      `window.flyToLocation(${defaultCenter.lat}, ${defaultCenter.lng}, 12); true;`
+      `window.flyToLocation(${defaultCenter.lat}, ${defaultCenter.lng}, 12); true;`,
     );
     fetchCrowdsourcedData();
     if (onRefresh) onRefresh();
@@ -287,7 +391,7 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
     }
 
     webViewRef.current?.injectJavaScript(
-      `window.updateFilters('${newOp}', '${newTech}', '${newMetric}'); true;`
+      `window.updateFilters('${newOp}', '${newTech}', '${newMetric}'); true;`,
     );
     fetchCrowdsourcedData(newOp, newTech, newMetric);
     setActiveDropdown(null);
@@ -419,7 +523,7 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
     var currentOperator = '${selectedOperator}';
     var currentTech = '${selectedTech}';
     var currentMetric = '${selectedMetric}';
-    var userSamples = ${JSON.stringify(allSamples)};
+    var userSamples = ${JSON.stringify(initialMapSamples)};
 
     // Initialize Leaflet Map
     var map = L.map('map', {
@@ -427,7 +531,31 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
       attributionControl: true,
       minZoom: 4,
       maxZoom: 18
-    }).setView([centerLat, centerLng], 11);
+    }).setView(${
+      viewRef.current &&
+      viewRef.current.forCenter === `${defaultCenter.lat},${defaultCenter.lng}`
+        ? `[${viewRef.current.lat}, ${viewRef.current.lng}], ${viewRef.current.zoom}`
+        : '[centerLat, centerLng], 11'
+    });
+
+    // Tell the app which area is on screen, so it loads the tests for that area (plus a margin)
+    var boundsTimer = null;
+    function reportBounds() {
+      if (!window.ReactNativeWebView) return;
+      clearTimeout(boundsTimer);
+      boundsTimer = setTimeout(function() {
+        var b = map.getBounds();
+        var p = b.pad(0.5);
+        var c = map.getCenter();
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'bounds',
+          visible: { minLat: b.getSouth(), maxLat: b.getNorth(), minLng: b.getWest(), maxLng: b.getEast() },
+          load: { minLat: p.getSouth(), maxLat: p.getNorth(), minLng: p.getWest(), maxLng: p.getEast() },
+          lat: c.lat, lng: c.lng, zoom: map.getZoom()
+        }));
+      }, 400);
+    }
+    map.on('moveend', reportBounds);
 
     // Tile layers (Light Theme: Esri World Street Map - Completely free, no API key needed)
     var lightLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
@@ -666,11 +794,18 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
     // Initial render
     renderHexagons();
     renderUserSamplePins();
+    reportBounds();
   </script>
 </body>
 </html>
     `;
-  }, [defaultCenter, selectedOperator, selectedTech, selectedMetric, allSamples]);
+  }, [
+    defaultCenter,
+    selectedOperator,
+    selectedTech,
+    selectedMetric,
+    initialMapSamples,
+  ]);
 
   return (
     <View style={styles.container}>
@@ -706,7 +841,8 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
         ) : searchQuery.length > 0 ? (
           <TouchableOpacity
             onPress={() => setSearchQuery('')}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
             <CloseIcon size={16} color="#64748B" />
           </TouchableOpacity>
         ) : null}
@@ -718,9 +854,15 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
         <View style={styles.filterCol}>
           <Text style={styles.filterLabel}>Metric</Text>
           <TouchableOpacity
-            style={[styles.filterPill, activeDropdown === 'metric' && styles.filterPillActive]}
-            onPress={() => setActiveDropdown(activeDropdown === 'metric' ? null : 'metric')}
-            activeOpacity={0.8}>
+            style={[
+              styles.filterPill,
+              activeDropdown === 'metric' && styles.filterPillActive,
+            ]}
+            onPress={() =>
+              setActiveDropdown(activeDropdown === 'metric' ? null : 'metric')
+            }
+            activeOpacity={0.8}
+          >
             <Text style={styles.filterPillText} numberOfLines={1}>
               {selectedMetric}
             </Text>
@@ -736,9 +878,17 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
         <View style={styles.filterCol}>
           <Text style={styles.filterLabel}>Technology</Text>
           <TouchableOpacity
-            style={[styles.filterPill, activeDropdown === 'technology' && styles.filterPillActive]}
-            onPress={() => setActiveDropdown(activeDropdown === 'technology' ? null : 'technology')}
-            activeOpacity={0.8}>
+            style={[
+              styles.filterPill,
+              activeDropdown === 'technology' && styles.filterPillActive,
+            ]}
+            onPress={() =>
+              setActiveDropdown(
+                activeDropdown === 'technology' ? null : 'technology',
+              )
+            }
+            activeOpacity={0.8}
+          >
             <Text style={styles.filterPillText} numberOfLines={1}>
               {selectedTech}
             </Text>
@@ -754,9 +904,17 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
         <View style={styles.filterCol}>
           <Text style={styles.filterLabel}>Operator</Text>
           <TouchableOpacity
-            style={[styles.filterPill, activeDropdown === 'operator' && styles.filterPillActive]}
-            onPress={() => setActiveDropdown(activeDropdown === 'operator' ? null : 'operator')}
-            activeOpacity={0.8}>
+            style={[
+              styles.filterPill,
+              activeDropdown === 'operator' && styles.filterPillActive,
+            ]}
+            onPress={() =>
+              setActiveDropdown(
+                activeDropdown === 'operator' ? null : 'operator',
+              )
+            }
+            activeOpacity={0.8}
+          >
             <Text style={styles.filterPillText} numberOfLines={1}>
               {selectedOperator}
             </Text>
@@ -779,10 +937,13 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
           startInLoadingState
           javaScriptEnabled
           domStorageEnabled
+          onMessage={handleMapMessage}
           renderLoading={() => (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#00A389" />
-              <Text style={styles.loadingText}>Rendering Coverage Heatmap...</Text>
+              <Text style={styles.loadingText}>
+                Rendering Coverage Heatmap...
+              </Text>
             </View>
           )}
         />
@@ -790,19 +951,36 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
         {/* Map Type Segmented Control (Top-Left on Map: [ Map | Satellite ]) */}
         <View style={styles.mapTypeControl}>
           <TouchableOpacity
-            style={[styles.mapTypeBtn, mapType === 'map' && styles.mapTypeBtnActive]}
+            style={[
+              styles.mapTypeBtn,
+              mapType === 'map' && styles.mapTypeBtnActive,
+            ]}
             onPress={() => handleToggleMapType('map')}
-            activeOpacity={0.8}>
-            <Text style={[styles.mapTypeText, mapType === 'map' && styles.mapTypeTextActive]}>
+            activeOpacity={0.8}
+          >
+            <Text
+              style={[
+                styles.mapTypeText,
+                mapType === 'map' && styles.mapTypeTextActive,
+              ]}
+            >
               Map
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.mapTypeBtn, mapType === 'satellite' && styles.mapTypeBtnActive]}
+            style={[
+              styles.mapTypeBtn,
+              mapType === 'satellite' && styles.mapTypeBtnActive,
+            ]}
             onPress={() => handleToggleMapType('satellite')}
-            activeOpacity={0.8}>
+            activeOpacity={0.8}
+          >
             <Text
-              style={[styles.mapTypeText, mapType === 'satellite' && styles.mapTypeTextActive]}>
+              style={[
+                styles.mapTypeText,
+                mapType === 'satellite' && styles.mapTypeTextActive,
+              ]}
+            >
               Satellite
             </Text>
           </TouchableOpacity>
@@ -814,19 +992,28 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
           <TouchableOpacity
             style={styles.controlCircleBtn}
             onPress={handleRecenter}
-            activeOpacity={0.8}>
+            activeOpacity={0.8}
+          >
             <CrosshairIcon size={20} color="#0F172A" />
           </TouchableOpacity>
 
           {/* Zoom Buttons Stack */}
           <View style={styles.zoomStackContainer}>
-            <TouchableOpacity style={styles.zoomBtn} onPress={handleZoomIn} activeOpacity={0.7}>
+            <TouchableOpacity
+              style={styles.zoomBtn}
+              onPress={handleZoomIn}
+              activeOpacity={0.7}
+            >
               <PlusIcon size={16} color="#0F172A" />
             </TouchableOpacity>
             <View style={styles.zoomDivider}>
               <View style={styles.zoomDot} />
             </View>
-            <TouchableOpacity style={styles.zoomBtn} onPress={handleZoomOut} activeOpacity={0.7}>
+            <TouchableOpacity
+              style={styles.zoomBtn}
+              onPress={handleZoomOut}
+              activeOpacity={0.7}
+            >
               <MinusIcon size={16} color="#0F172A" />
             </TouchableOpacity>
           </View>
@@ -872,7 +1059,8 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
                   activeDropdown === 'metric' && styles.dropdownCardLeft,
                   activeDropdown === 'technology' && styles.dropdownCardCenter,
                   activeDropdown === 'operator' && styles.dropdownCardRight,
-                ]}>
+                ]}
+              >
                 {activeDropdown === 'metric' &&
                   METRIC_OPTIONS.map(opt => {
                     const isSelected = selectedMetric === opt;
@@ -881,19 +1069,24 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
                         key={opt}
                         style={styles.dropdownItemRow}
                         onPress={() => handleSelectOption('metric', opt)}
-                        activeOpacity={0.7}>
+                        activeOpacity={0.7}
+                      >
                         <View
                           style={[
                             styles.checkboxBox,
                             isSelected && styles.checkboxBoxSelected,
-                          ]}>
-                          {isSelected && <View style={styles.checkboxInnerCheck} />}
+                          ]}
+                        >
+                          {isSelected && (
+                            <View style={styles.checkboxInnerCheck} />
+                          )}
                         </View>
                         <Text
                           style={[
                             styles.dropdownItemText,
                             isSelected && styles.dropdownItemTextSelected,
-                          ]}>
+                          ]}
+                        >
                           {opt}
                         </Text>
                       </TouchableOpacity>
@@ -908,19 +1101,24 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
                         key={opt}
                         style={styles.dropdownItemRow}
                         onPress={() => handleSelectOption('technology', opt)}
-                        activeOpacity={0.7}>
+                        activeOpacity={0.7}
+                      >
                         <View
                           style={[
                             styles.checkboxBox,
                             isSelected && styles.checkboxBoxSelected,
-                          ]}>
-                          {isSelected && <View style={styles.checkboxInnerCheck} />}
+                          ]}
+                        >
+                          {isSelected && (
+                            <View style={styles.checkboxInnerCheck} />
+                          )}
                         </View>
                         <Text
                           style={[
                             styles.dropdownItemText,
                             isSelected && styles.dropdownItemTextSelected,
-                          ]}>
+                          ]}
+                        >
                           {opt}
                         </Text>
                       </TouchableOpacity>
@@ -935,19 +1133,24 @@ export const CoverageMapView: React.FC<CoverageMapViewProps> = ({
                         key={opt}
                         style={styles.dropdownItemRow}
                         onPress={() => handleSelectOption('operator', opt)}
-                        activeOpacity={0.7}>
+                        activeOpacity={0.7}
+                      >
                         <View
                           style={[
                             styles.checkboxBox,
                             isSelected && styles.checkboxBoxSelected,
-                          ]}>
-                          {isSelected && <View style={styles.checkboxInnerCheck} />}
+                          ]}
+                        >
+                          {isSelected && (
+                            <View style={styles.checkboxInnerCheck} />
+                          )}
                         </View>
                         <Text
                           style={[
                             styles.dropdownItemText,
                             isSelected && styles.dropdownItemTextSelected,
-                          ]}>
+                          ]}
+                        >
                           {opt}
                         </Text>
                       </TouchableOpacity>
