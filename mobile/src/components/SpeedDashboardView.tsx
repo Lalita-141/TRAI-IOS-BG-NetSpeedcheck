@@ -48,6 +48,7 @@ import {
   SignalBarsIcon,
   ChevronRightIcon,
 } from './Icons';
+import { isCoverageTestSupported } from '../utils/platformFeatures';
 import { useTranslation } from '../i18n';
 import {
   continuousTestService,
@@ -60,10 +61,19 @@ import {
   describeSchedule,
 } from '../services/scheduledTestService';
 
-import { NOT_MEASURED, displayCarrier, displayRadio } from '../utils/sampleDisplay';
+import {
+  NOT_MEASURED,
+  displayCarrier,
+  displayRadio,
+} from '../utils/sampleDisplay';
 
 const formatScheduleTime = (ts: number) =>
-  new Date(ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  new Date(ts).toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 
 export type TestType = 'speed' | 'video_browser' | 'coverage' | 'advance';
 export type ScreenMode =
@@ -78,7 +88,6 @@ export type ScreenMode =
   | 'continuous_testing'
   | 'continuous_result'
   | 'schedule_setup';
-
 
 interface SpeedDashboardViewProps {
   config: AppConfig | null;
@@ -106,10 +115,12 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
   const [screenMode, setScreenMode] = useState<ScreenMode>('home');
 
   // Video & Browser Test State
-  const [videoResults, setVideoResults] = useState<VideoBrowserTestResults | null>(null);
+  const [videoResults, setVideoResults] =
+    useState<VideoBrowserTestResults | null>(null);
   const [videoSample, setVideoSample] = useState<Sample | null>(null);
   // Coverage Test State
-  const [coverageResults, setCoverageResults] = useState<CoverageTestResults | null>(null);
+  const [coverageResults, setCoverageResults] =
+    useState<CoverageTestResults | null>(null);
   const [coverageSample, setCoverageSample] = useState<Sample | null>(null);
   // Advance Tests Modal State
   const [showAdvanceModal, setShowAdvanceModal] = useState<boolean>(false);
@@ -122,10 +133,14 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
   const scheduleNextRunAt = getNextRunAt(scheduleState);
   const continuousSession = useContinuousSession();
   const isContinuousRunning = continuousSession.active;
-  const continuousConfig: ContinuousTestConfig | null = continuousSession.config;
-  const [continuousResults, setContinuousResults] = useState<ContinuousTestSessionResults | null>(null);
+  const continuousConfig: ContinuousTestConfig | null =
+    continuousSession.config;
+  const [continuousResults, setContinuousResults] =
+    useState<ContinuousTestSessionResults | null>(null);
   const showContinuousFinished =
-    !continuousSession.active && !!continuousSession.lastResults && !continuousSession.resultsSeen;
+    !continuousSession.active &&
+    !!continuousSession.lastResults &&
+    !continuousSession.resultsSeen;
 
   const openContinuousResults = (res: ContinuousTestSessionResults) => {
     continuousTestService.markResultsSeen();
@@ -191,7 +206,9 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
 
   // What the last real test measured; nothing is shown before the first test
   const carrierPillText = last
-    ? [displayCarrier(last), displayRadio(last)].filter(v => v !== NOT_MEASURED).join('_') || NOT_MEASURED
+    ? [displayCarrier(last), displayRadio(last)]
+        .filter(v => v !== NOT_MEASURED)
+        .join('_') || NOT_MEASURED
     : 'No test yet';
 
   const handleStartCurrentTest = () => {
@@ -200,7 +217,7 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
       onTestNow();
     } else if (activeTestType === 'video_browser') {
       setScreenMode('video_testing');
-    } else if (activeTestType === 'coverage') {
+    } else if (activeTestType === 'coverage' && isCoverageTestSupported()) {
       setScreenMode('coverage_testing');
     } else if (activeTestType === 'advance') {
       setShowAdvanceModal(true);
@@ -222,7 +239,9 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
     return (
       <SpeedTestResultView
         sample={status.lastSample}
-        testId={status.lastSample?.id ? status.lastSample.id.slice(-2) : NOT_MEASURED}
+        testId={
+          status.lastSample?.id ? status.lastSample.id.slice(-2) : NOT_MEASURED
+        }
         onBack={() => setScreenMode('home')}
         onRunVideoBrowserTest={() => {
           setActiveTestType('video_browser');
@@ -309,8 +328,13 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
           setScreenMode('continuous_testing');
         }}
         onStopTest={() => {
-          continuousTestService.stop().then(() => continuousTestService.markResultsSeen());
-          Alert.alert('Continuous Test Stopped', 'Continuous testing has been halted.');
+          continuousTestService
+            .stop()
+            .then(() => continuousTestService.markResultsSeen());
+          Alert.alert(
+            'Continuous Test Stopped',
+            'Continuous testing has been halted.',
+          );
         }}
       />
     );
@@ -348,7 +372,6 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
     );
   }
 
-
   // 8. RENDER SCHEDULED SETUP SCREEN (Screenshot 3)
   if (screenMode === 'schedule_setup') {
     return (
@@ -359,14 +382,16 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
           scheduledTestService.setSchedule(cfg);
           Alert.alert(
             'Test Scheduled',
-            `Your automated test runs ${describeSchedule(cfg)}, from ${cfg.fromDate} to ${cfg.toDate}.`
+            `Your automated test runs ${describeSchedule(cfg)}, from ${
+              cfg.fromDate
+            } to ${cfg.toDate}.`,
           );
         }}
         onDisableSchedule={() => {
           scheduledTestService.clearSchedule();
           Alert.alert(
             'Schedule Disabled',
-            'Automated scheduled testing has been disabled.'
+            'Automated scheduled testing has been disabled.',
           );
         }}
       />
@@ -377,31 +402,39 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
   const renderContinuousCard = () => {
     if (isContinuousRunning && continuousConfig) {
       const remainingMins = continuousSession.endsAt
-        ? Math.max(0, Math.ceil((continuousSession.endsAt - Date.now()) / 60000))
+        ? Math.max(
+            0,
+            Math.ceil((continuousSession.endsAt - Date.now()) / 60000),
+          )
         : continuousConfig.durationMins;
       return (
         <TouchableOpacity
           style={styles.activeScheduleDashboardCard}
           onPress={() => setScreenMode('continuous_testing')}
-          activeOpacity={0.85}>
+          activeOpacity={0.85}
+        >
           <View style={styles.activeScheduleDashboardLeft}>
             <View style={styles.statusDotLive} />
             <View>
               <Text style={styles.activeScheduleDashboardTitle}>
-                Continuous Testing Active ({continuousConfig.testType.toUpperCase()})
+                Continuous Testing Active (
+                {continuousConfig.testType.toUpperCase()})
               </Text>
               <Text style={styles.activeScheduleDashboardSub}>
-                Interval: {continuousConfig.gapSeconds}s • Duration: {continuousConfig.durationMins}m
+                Interval: {continuousConfig.gapSeconds}s • Duration:{' '}
+                {continuousConfig.durationMins}m
               </Text>
               <Text style={styles.activeScheduleDashboardSub}>
-                Cycle #{Math.max(1, continuousSession.currentCycle)} • ~{remainingMins}m left • Tap to view
+                Cycle #{Math.max(1, continuousSession.currentCycle)} • ~
+                {remainingMins}m left • Tap to view
               </Text>
             </View>
           </View>
           <TouchableOpacity
             style={styles.disableSmallBtn}
             onPress={stopContinuous}
-            activeOpacity={0.8}>
+            activeOpacity={0.8}
+          >
             <Text style={styles.disableSmallBtnText}>Stop</Text>
           </TouchableOpacity>
         </TouchableOpacity>
@@ -413,7 +446,8 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
         <TouchableOpacity
           style={styles.activeScheduleDashboardCard}
           onPress={() => openContinuousResults(res)}
-          activeOpacity={0.85}>
+          activeOpacity={0.85}
+        >
           <View style={styles.activeScheduleDashboardLeft}>
             <View>
               <Text style={styles.activeScheduleDashboardTitle}>
@@ -444,7 +478,8 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
           tintColor="#00A389"
           colors={['#00A389']}
         />
-      }>
+      }
+    >
       {/* Main Center Gauge Card with START Button */}
       <View style={styles.gaugeCard}>
         {/* Top Header Pills (Network & Coverage dBm matching reference mockup) */}
@@ -457,7 +492,10 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
           {last?.signal_dbm != null && (
             <View style={styles.coveragePill}>
               <SignalBarsIcon size={14} color="#10B981" />
-              <Text style={styles.coveragePillText}>{t('filter_coverage', 'Coverage')}: {Math.round(last.signal_dbm)} dBm</Text>
+              <Text style={styles.coveragePillText}>
+                {t('filter_coverage', 'Coverage')}:{' '}
+                {Math.round(last.signal_dbm)} dBm
+              </Text>
             </View>
           )}
         </View>
@@ -483,10 +521,13 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
             <TouchableOpacity
               style={[
                 styles.testButton,
-                activeTestType === 'speed' ? styles.testButtonActive : styles.testButtonInactive,
+                activeTestType === 'speed'
+                  ? styles.testButtonActive
+                  : styles.testButtonInactive,
               ]}
               onPress={() => setActiveTestType('speed')}
-              activeOpacity={0.85}>
+              activeOpacity={0.85}
+            >
               <LightningIcon
                 size={16}
                 color={activeTestType === 'speed' ? '#0F172A' : '#64748B'}
@@ -497,7 +538,8 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
                   activeTestType === 'speed'
                     ? styles.testButtonTextActive
                     : styles.testButtonTextInactive,
-                ]}>
+                ]}
+              >
                 {t('filter_speed', 'Speed')} Test
               </Text>
             </TouchableOpacity>
@@ -510,10 +552,13 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
                   : styles.testButtonInactive,
               ]}
               onPress={() => setActiveTestType('video_browser')}
-              activeOpacity={0.85}>
+              activeOpacity={0.85}
+            >
               <VideoBrowserTestIcon
                 size={16}
-                color={activeTestType === 'video_browser' ? '#0F172A' : '#64748B'}
+                color={
+                  activeTestType === 'video_browser' ? '#0F172A' : '#64748B'
+                }
               />
               <Text
                 style={[
@@ -521,7 +566,8 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
                   activeTestType === 'video_browser'
                     ? styles.testButtonTextActive
                     : styles.testButtonTextInactive,
-                ]}>
+                ]}
+              >
                 {t('filter_video', 'Video')} & Browser
               </Text>
             </TouchableOpacity>
@@ -529,38 +575,48 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
 
           {/* Row 2: Coverage Test & Advance Tests */}
           <View style={styles.testButtonsRow}>
-            <TouchableOpacity
-              style={[
-                styles.testButton,
-                activeTestType === 'coverage' ? styles.testButtonActive : styles.testButtonInactive,
-              ]}
-              onPress={() => setActiveTestType('coverage')}
-              activeOpacity={0.85}>
-              <CoverageTestIcon
-                size={16}
-                color={activeTestType === 'coverage' ? '#0F172A' : '#64748B'}
-              />
-              <Text
+            {/* Coverage needs signal data only Android provides: hidden on iPhone */}
+            {isCoverageTestSupported() ? (
+              <TouchableOpacity
                 style={[
-                  styles.testButtonText,
+                  styles.testButton,
                   activeTestType === 'coverage'
-                    ? styles.testButtonTextActive
-                    : styles.testButtonTextInactive,
-                ]}>
-                {t('filter_coverage', 'Coverage')} Test
-              </Text>
-            </TouchableOpacity>
+                    ? styles.testButtonActive
+                    : styles.testButtonInactive,
+                ]}
+                onPress={() => setActiveTestType('coverage')}
+                activeOpacity={0.85}
+              >
+                <CoverageTestIcon
+                  size={16}
+                  color={activeTestType === 'coverage' ? '#0F172A' : '#64748B'}
+                />
+                <Text
+                  style={[
+                    styles.testButtonText,
+                    activeTestType === 'coverage'
+                      ? styles.testButtonTextActive
+                      : styles.testButtonTextInactive,
+                  ]}
+                >
+                  {t('filter_coverage', 'Coverage')} Test
+                </Text>
+              </TouchableOpacity>
+            ) : null}
 
             <TouchableOpacity
               style={[
                 styles.testButton,
-                activeTestType === 'advance' ? styles.testButtonActive : styles.testButtonInactive,
+                activeTestType === 'advance'
+                  ? styles.testButtonActive
+                  : styles.testButtonInactive,
               ]}
               onPress={() => {
                 setActiveTestType('advance');
                 setShowAdvanceModal(true);
               }}
-              activeOpacity={0.85}>
+              activeOpacity={0.85}
+            >
               <AdvanceTestsIcon
                 size={16}
                 color={activeTestType === 'advance' ? '#0F172A' : '#64748B'}
@@ -571,7 +627,8 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
                   activeTestType === 'advance'
                     ? styles.testButtonTextActive
                     : styles.testButtonTextInactive,
-                ]}>
+                ]}
+              >
                 {t('filter_advance', 'Advance')} Tests
               </Text>
             </TouchableOpacity>
@@ -589,21 +646,31 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
             <TouchableOpacity
               style={styles.viewResultCard}
               onPress={() => setScreenMode('result')}
-              activeOpacity={0.85}>
+              activeOpacity={0.85}
+            >
               <View style={styles.viewResultLeft}>
                 <View style={styles.viewResultIconCircle}>
                   <LightningIcon size={16} color="#00A389" />
                 </View>
                 <View>
-                  <Text style={styles.viewResultTitle}>{t('latest_test_result', 'Latest Test Result')}</Text>
+                  <Text style={styles.viewResultTitle}>
+                    {t('latest_test_result', 'Latest Test Result')}
+                  </Text>
                   <Text style={styles.viewResultSubtitle}>
-                    {last.down_mbps != null ? `${last.down_mbps.toFixed(1)} Mbps Down` : '--'} •{' '}
-                    {last.latency_ms != null ? `${Math.round(last.latency_ms)} ms` : '--'}
+                    {last.down_mbps != null
+                      ? `${last.down_mbps.toFixed(1)} Mbps Down`
+                      : '--'}{' '}
+                    •{' '}
+                    {last.latency_ms != null
+                      ? `${Math.round(last.latency_ms)} ms`
+                      : '--'}
                   </Text>
                 </View>
               </View>
               <View style={styles.viewResultArrow}>
-                <Text style={styles.viewResultDetailsText}>{t('view_details', 'View Details')}</Text>
+                <Text style={styles.viewResultDetailsText}>
+                  {t('view_details', 'View Details')}
+                </Text>
                 <ChevronRightIcon size={16} color="#00A389" />
               </View>
             </TouchableOpacity>
@@ -619,9 +686,13 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
                 ]}
               />
               <View>
-                <Text style={styles.monitoringTitle}>{t('background_monitoring', 'Background QoS Monitoring')}</Text>
+                <Text style={styles.monitoringTitle}>
+                  {t('background_monitoring', 'Background QoS Monitoring')}
+                </Text>
                 <Text style={styles.monitoringSubtitle}>
-                  {status.isRunning ? t('status_active', 'Active (Recording samples)') : t('status_idle', 'Idle (Tap to start)')}
+                  {status.isRunning
+                    ? t('status_active', 'Active (Recording samples)')
+                    : t('status_idle', 'Idle (Tap to start)')}
                 </Text>
               </View>
             </View>
@@ -629,19 +700,26 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
             <TouchableOpacity
               style={[
                 styles.monitoringToggleBtn,
-                status.isRunning ? styles.monitoringStopBtn : styles.monitoringStartBtn,
+                status.isRunning
+                  ? styles.monitoringStopBtn
+                  : styles.monitoringStartBtn,
               ]}
               onPress={onToggleMonitoring}
-              activeOpacity={0.8}>
+              activeOpacity={0.8}
+            >
               {status.isRunning ? (
                 <>
                   <StopIcon size={13} color="#FFFFFF" />
-                  <Text style={styles.monitoringBtnText}>{t('stop_test', 'Stop')}</Text>
+                  <Text style={styles.monitoringBtnText}>
+                    {t('stop_test', 'Stop')}
+                  </Text>
                 </>
               ) : (
                 <>
                   <PlayIcon size={13} color="#FFFFFF" />
-                  <Text style={styles.monitoringBtnText}>{t('start_btn', 'Start')}</Text>
+                  <Text style={styles.monitoringBtnText}>
+                    {t('start_btn', 'Start')}
+                  </Text>
                 </>
               )}
             </TouchableOpacity>
@@ -651,13 +729,20 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
           {nearbyCoverage && nearbyCoverage.operators?.length > 0 && (
             <View style={styles.nearbyCard}>
               <View style={styles.nearbyHeaderRow}>
-                <Text style={styles.nearbyTitle}>⚡ Top Operator in Your Area</Text>
-                <Text style={styles.nearbyRadiusText}>Within {nearbyCoverage.radius_km} km</Text>
+                <Text style={styles.nearbyTitle}>
+                  ⚡ Top Operator in Your Area
+                </Text>
+                <Text style={styles.nearbyRadiusText}>
+                  Within {nearbyCoverage.radius_km} km
+                </Text>
               </View>
               <View style={styles.nearbyOpRow}>
-                <Text style={styles.nearbyOpName}>{nearbyCoverage.operators[0].carrier}</Text>
+                <Text style={styles.nearbyOpName}>
+                  {nearbyCoverage.operators[0].carrier}
+                </Text>
                 <Text style={styles.nearbyOpSpeed}>
-                  Avg {nearbyCoverage.operators[0].avg_down_mbps} Mbps • {nearbyCoverage.operators[0].avg_latency_ms} ms latency
+                  Avg {nearbyCoverage.operators[0].avg_down_mbps} Mbps •{' '}
+                  {nearbyCoverage.operators[0].avg_latency_ms} ms latency
                 </Text>
               </View>
             </View>
@@ -673,15 +758,19 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
             <TouchableOpacity
               style={styles.viewResultCard}
               onPress={() => setScreenMode('video_result')}
-              activeOpacity={0.85}>
+              activeOpacity={0.85}
+            >
               <View style={styles.viewResultLeft}>
                 <View style={styles.viewResultIconCircle}>
                   <VideoBrowserTestIcon size={16} color="#00A389" />
                 </View>
                 <View>
-                  <Text style={styles.viewResultTitle}>Latest Video & Browser Result</Text>
+                  <Text style={styles.viewResultTitle}>
+                    Latest Video & Browser Result
+                  </Text>
                   <Text style={styles.viewResultSubtitle}>
-                    {videoResults.videoDelayMs ?? NOT_MEASURED} ms Video Delay • {videoResults.webDelayMs ?? NOT_MEASURED} ms Web Delay
+                    {videoResults.videoDelayMs ?? NOT_MEASURED} ms Video Delay •{' '}
+                    {videoResults.webDelayMs ?? NOT_MEASURED} ms Web Delay
                   </Text>
                 </View>
               </View>
@@ -696,9 +785,12 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
           <TouchableOpacity
             style={styles.fullWidthActionBtn}
             onPress={() => setScreenMode('video_testing')}
-            activeOpacity={0.85}>
+            activeOpacity={0.85}
+          >
             <VideoBrowserTestIcon size={18} color="#FFFFFF" />
-            <Text style={styles.fullWidthActionBtnText}>Start Video & Browser Test</Text>
+            <Text style={styles.fullWidthActionBtnText}>
+              Start Video & Browser Test
+            </Text>
           </TouchableOpacity>
         </View>
       )}
@@ -711,18 +803,23 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
             <TouchableOpacity
               style={styles.viewResultCard}
               onPress={() => setScreenMode('coverage_result')}
-              activeOpacity={0.85}>
+              activeOpacity={0.85}
+            >
               <View style={styles.viewResultLeft}>
                 <View style={styles.viewResultIconCircle}>
                   <CoverageTestIcon size={16} color="#00A389" />
                 </View>
                 <View>
-                  <Text style={styles.viewResultTitle}>Latest Coverage Result</Text>
+                  <Text style={styles.viewResultTitle}>
+                    Latest Coverage Result
+                  </Text>
                   <Text style={styles.viewResultSubtitle}>
                     {coverageResults.signalDbm != null
                       ? `${coverageResults.signalDbm} dBm • ${coverageResults.signalQuality} Signal`
                       : coverageResults.connected
-                      ? `Connected • ${coverageResults.latencyMs ?? NOT_MEASURED} ms latency`
+                      ? `Connected • ${
+                          coverageResults.latencyMs ?? NOT_MEASURED
+                        } ms latency`
                       : 'No Service'}
                   </Text>
                 </View>
@@ -738,9 +835,12 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
           <TouchableOpacity
             style={styles.fullWidthActionBtn}
             onPress={() => setScreenMode('coverage_testing')}
-            activeOpacity={0.85}>
+            activeOpacity={0.85}
+          >
             <CoverageTestIcon size={18} color="#FFFFFF" />
-            <Text style={styles.fullWidthActionBtnText}>Start Coverage Diagnostic Test</Text>
+            <Text style={styles.fullWidthActionBtnText}>
+              Start Coverage Diagnostic Test
+            </Text>
           </TouchableOpacity>
         </View>
       )}
@@ -755,19 +855,25 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
           <TouchableOpacity
             style={styles.fullWidthActionBtn}
             onPress={() => setShowAdvanceModal(true)}
-            activeOpacity={0.85}>
+            activeOpacity={0.85}
+          >
             <AdvanceTestsIcon size={18} color="#FFFFFF" />
-            <Text style={styles.fullWidthActionBtnText}>Run an Advance Test</Text>
+            <Text style={styles.fullWidthActionBtnText}>
+              Run an Advance Test
+            </Text>
           </TouchableOpacity>
 
           <View style={[styles.detailsCard, styles.advanceCardSpacing]}>
             <TouchableOpacity
               style={styles.detailRow}
               onPress={() => setScreenMode('continuous_setup')}
-              activeOpacity={0.7}>
+              activeOpacity={0.7}
+            >
               <View>
                 <Text style={styles.advTitle}>Continuous Test</Text>
-                <Text style={styles.advSubtitle}>Capture network coverage continuously</Text>
+                <Text style={styles.advSubtitle}>
+                  Capture network coverage continuously
+                </Text>
               </View>
               <ChevronRightIcon size={18} color="#64748B" />
             </TouchableOpacity>
@@ -777,10 +883,13 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
             <TouchableOpacity
               style={styles.detailRow}
               onPress={() => setScreenMode('schedule_setup')}
-              activeOpacity={0.7}>
+              activeOpacity={0.7}
+            >
               <View>
                 <Text style={styles.advTitle}>Schedule Test</Text>
-                <Text style={styles.advSubtitle}>Set it once. The app runs tests automatically</Text>
+                <Text style={styles.advSubtitle}>
+                  Set it once. The app runs tests automatically
+                </Text>
               </View>
               <ChevronRightIcon size={18} color="#64748B" />
             </TouchableOpacity>
@@ -793,23 +902,33 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
                 <View style={styles.statusDotLive} />
                 <View>
                   <Text style={styles.activeScheduleDashboardTitle}>
-                    Scheduled Testing Active ({activeSchedule.frequency.toUpperCase()})
+                    Scheduled Testing Active (
+                    {activeSchedule.frequency.toUpperCase()})
                   </Text>
                   <Text style={styles.activeScheduleDashboardSub}>
-                    {describeSchedule(activeSchedule)} • {activeSchedule.fromDate} to {activeSchedule.toDate}
+                    {describeSchedule(activeSchedule)} •{' '}
+                    {activeSchedule.fromDate} to {activeSchedule.toDate}
                   </Text>
                   <Text style={styles.activeScheduleDashboardSub}>
                     {scheduleState.isRunning
                       ? 'Running scheduled test now...'
                       : scheduleNextRunAt
-                      ? `Next: ${scheduleNextRunAt <= Date.now() ? 'due now' : formatScheduleTime(scheduleNextRunAt)}`
+                      ? `Next: ${
+                          scheduleNextRunAt <= Date.now()
+                            ? 'due now'
+                            : formatScheduleTime(scheduleNextRunAt)
+                        }`
                       : 'Schedule finished'}
                     {scheduleState.lastRunAt
-                      ? ` • Last: ${formatScheduleTime(scheduleState.lastRunAt)}`
+                      ? ` • Last: ${formatScheduleTime(
+                          scheduleState.lastRunAt,
+                        )}`
                       : ''}
                   </Text>
                   {scheduleState.lastOutcome && (
-                    <Text style={styles.activeScheduleDashboardSub}>{scheduleState.lastOutcome}</Text>
+                    <Text style={styles.activeScheduleDashboardSub}>
+                      {scheduleState.lastOutcome}
+                    </Text>
                   )}
                 </View>
               </View>
@@ -817,9 +936,13 @@ export const SpeedDashboardView: React.FC<SpeedDashboardViewProps> = ({
                 style={styles.disableSmallBtn}
                 onPress={() => {
                   scheduledTestService.clearSchedule();
-                  Alert.alert('Schedule Disabled', 'Automated scheduled testing has been disabled.');
+                  Alert.alert(
+                    'Schedule Disabled',
+                    'Automated scheduled testing has been disabled.',
+                  );
                 }}
-                activeOpacity={0.8}>
+                activeOpacity={0.8}
+              >
                 <Text style={styles.disableSmallBtnText}>Disable</Text>
               </TouchableOpacity>
             </View>

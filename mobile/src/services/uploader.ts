@@ -49,16 +49,20 @@ class Uploader {
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), 20000);
 
-          const res = await fetch(`${serverUrl}/v1/speed-samples`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Accept: 'application/json',
-            },
-            body: JSON.stringify({ samples: batch }),
-            signal: controller.signal,
-          });
-          clearTimeout(timeout);
+          let res: Response;
+          try {
+            res = await fetch(`${serverUrl}/v1/speed-samples`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+              },
+              body: JSON.stringify({ samples: batch }),
+              signal: controller.signal,
+            });
+          } finally {
+            clearTimeout(timeout); // also when the request fails (e.g. offline)
+          }
 
           if (!res.ok) {
             console.warn(`Server upload error status: ${res.status}`);

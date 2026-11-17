@@ -51,10 +51,13 @@ function toSignalInfo(info: any, network: string): SignalInfo {
 
 // A native radio query must never hold up a test
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([
     promise,
-    new Promise<null>(resolve => setTimeout(() => resolve(null), ms)),
-  ]);
+    new Promise<null>(resolve => {
+      timer = setTimeout(() => resolve(null), ms);
+    }),
+  ]).finally(() => clearTimeout(timer)); // no leftover timer once the query answers
 }
 
 let cachedIsp: { isp: string; timestamp: number } | null = null;
@@ -72,8 +75,7 @@ export async function resolvePublicISP(forceFresh: boolean = false): Promise<str
     const res = await fetch(`https://ipwho.is/?fields=connection,success&_t=${Date.now()}`, {
       headers: { 'Cache-Control': 'no-cache, no-store' },
       signal: controller.signal,
-    });
-    clearTimeout(timeout);
+    }).finally(() => clearTimeout(timeout)); // also when the request fails
 
     if (res.ok) {
       const data = await res.json();
@@ -125,8 +127,7 @@ export class SpeedTester {
         method: 'GET',
         headers: { 'Cache-Control': 'no-cache, no-store' },
         signal: controller.signal,
-      });
-      clearTimeout(timeout);
+      }).finally(() => clearTimeout(timeout)); // also when the request fails
       return res.ok ? Date.now() - start : null;
     } catch (err) {
       console.warn(`Ping ${tag} failed:`, err);

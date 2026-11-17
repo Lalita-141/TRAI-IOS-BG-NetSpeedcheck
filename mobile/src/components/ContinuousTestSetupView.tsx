@@ -14,6 +14,7 @@ import {
   RocketIcon,
   StopIcon,
 } from './Icons';
+import { isCoverageTestSupported } from '../utils/platformFeatures';
 
 export type ContinuousTestType = 'coverage' | 'speed' | 'video_browser';
 
@@ -31,21 +32,26 @@ interface ContinuousTestSetupViewProps {
   onStopTest?: () => void;
 }
 
-export const ContinuousTestSetupView: React.FC<ContinuousTestSetupViewProps> = ({
+export const ContinuousTestSetupView: React.FC<
+  ContinuousTestSetupViewProps
+> = ({
   isRunning = false,
   activeConfig = null,
   onBack,
   onStartTest,
   onStopTest,
 }) => {
-  const [testType, setTestType] = useState<ContinuousTestType>(
-    activeConfig?.testType || 'coverage'
-  );
+  const coverageSupported = isCoverageTestSupported(); // Coverage is Android only
+  const [testType, setTestType] = useState<ContinuousTestType>(() => {
+    const initial =
+      activeConfig?.testType || (coverageSupported ? 'coverage' : 'speed');
+    return initial === 'coverage' && !coverageSupported ? 'speed' : initial;
+  });
   const [gapSeconds, setGapSeconds] = useState<number>(
-    activeConfig?.gapSeconds || 5
+    activeConfig?.gapSeconds || 5,
   );
   const [durationMins, setDurationMins] = useState<number>(
-    activeConfig?.durationMins || 10
+    activeConfig?.durationMins || 10,
   );
 
   const handleDecreaseGap = () => {
@@ -76,7 +82,11 @@ export const ContinuousTestSetupView: React.FC<ContinuousTestSetupViewProps> = (
     <SafeAreaView style={styles.safeArea}>
       {/* Top Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={onBack} activeOpacity={0.7}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={onBack}
+          activeOpacity={0.7}
+        >
           <BackArrowIcon size={22} color="#0F172A" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Setting up Continuous Test</Text>
@@ -87,53 +97,72 @@ export const ContinuousTestSetupView: React.FC<ContinuousTestSetupViewProps> = (
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}>
+        showsVerticalScrollIndicator={false}
+      >
         {/* Section 1: Select a Test Type */}
         <Text style={styles.sectionHeading}>Select a Test Type :</Text>
 
         <View style={styles.pillsRow}>
-          {/* Coverage Pill */}
-          <TouchableOpacity
-            style={[
-              styles.testPill,
-              testType === 'coverage' ? styles.testPillActive : styles.testPillInactive,
-            ]}
-            onPress={() => setTestType('coverage')}
-            activeOpacity={0.8}>
-            <Text
+          {/* Coverage Pill (Android only: iPhone has no signal data) */}
+          {coverageSupported ? (
+            <TouchableOpacity
               style={[
-                styles.testPillText,
-                testType === 'coverage' ? styles.testPillTextActive : styles.testPillTextInactive,
-              ]}>
-              Coverage
-            </Text>
-            <View
-              style={[
-                styles.radioIndicator,
-                testType === 'coverage' ? styles.radioActive : styles.radioInactive,
+                styles.testPill,
+                testType === 'coverage'
+                  ? styles.testPillActive
+                  : styles.testPillInactive,
               ]}
-            />
-          </TouchableOpacity>
+              onPress={() => setTestType('coverage')}
+              activeOpacity={0.8}
+            >
+              <Text
+                style={[
+                  styles.testPillText,
+                  testType === 'coverage'
+                    ? styles.testPillTextActive
+                    : styles.testPillTextInactive,
+                ]}
+              >
+                Coverage
+              </Text>
+              <View
+                style={[
+                  styles.radioIndicator,
+                  testType === 'coverage'
+                    ? styles.radioActive
+                    : styles.radioInactive,
+                ]}
+              />
+            </TouchableOpacity>
+          ) : null}
 
           {/* Speed Test Pill */}
           <TouchableOpacity
             style={[
               styles.testPill,
-              testType === 'speed' ? styles.testPillActive : styles.testPillInactive,
+              testType === 'speed'
+                ? styles.testPillActive
+                : styles.testPillInactive,
             ]}
             onPress={() => setTestType('speed')}
-            activeOpacity={0.8}>
+            activeOpacity={0.8}
+          >
             <Text
               style={[
                 styles.testPillText,
-                testType === 'speed' ? styles.testPillTextActive : styles.testPillTextInactive,
-              ]}>
+                testType === 'speed'
+                  ? styles.testPillTextActive
+                  : styles.testPillTextInactive,
+              ]}
+            >
               Speed Test
             </Text>
             <View
               style={[
                 styles.radioIndicator,
-                testType === 'speed' ? styles.radioActive : styles.radioInactive,
+                testType === 'speed'
+                  ? styles.radioActive
+                  : styles.radioInactive,
               ]}
             />
           </TouchableOpacity>
@@ -142,22 +171,30 @@ export const ContinuousTestSetupView: React.FC<ContinuousTestSetupViewProps> = (
           <TouchableOpacity
             style={[
               styles.testPill,
-              testType === 'video_browser' ? styles.testPillActive : styles.testPillInactive,
+              testType === 'video_browser'
+                ? styles.testPillActive
+                : styles.testPillInactive,
             ]}
             onPress={() => setTestType('video_browser')}
-            activeOpacity={0.8}>
+            activeOpacity={0.8}
+          >
             <Text
               style={[
                 styles.testPillText,
-                testType === 'video_browser' ? styles.testPillTextActive : styles.testPillTextInactive,
+                testType === 'video_browser'
+                  ? styles.testPillTextActive
+                  : styles.testPillTextInactive,
               ]}
-              numberOfLines={1}>
+              numberOfLines={1}
+            >
               Video and...
             </Text>
             <View
               style={[
                 styles.radioIndicator,
-                testType === 'video_browser' ? styles.radioActive : styles.radioInactive,
+                testType === 'video_browser'
+                  ? styles.radioActive
+                  : styles.radioInactive,
               ]}
             />
           </TouchableOpacity>
@@ -187,14 +224,16 @@ export const ContinuousTestSetupView: React.FC<ContinuousTestSetupViewProps> = (
               <TouchableOpacity
                 style={styles.stepperBtn}
                 onPress={handleDecreaseGap}
-                activeOpacity={0.6}>
+                activeOpacity={0.6}
+              >
                 <Text style={styles.stepperText}>−</Text>
               </TouchableOpacity>
               <View style={styles.stepperDivider} />
               <TouchableOpacity
                 style={styles.stepperBtn}
                 onPress={handleIncreaseGap}
-                activeOpacity={0.6}>
+                activeOpacity={0.6}
+              >
                 <Text style={styles.stepperText}>+</Text>
               </TouchableOpacity>
             </View>
@@ -220,14 +259,16 @@ export const ContinuousTestSetupView: React.FC<ContinuousTestSetupViewProps> = (
               <TouchableOpacity
                 style={styles.stepperBtn}
                 onPress={handleDecreaseDuration}
-                activeOpacity={0.6}>
+                activeOpacity={0.6}
+              >
                 <Text style={styles.stepperText}>−</Text>
               </TouchableOpacity>
               <View style={styles.stepperDivider} />
               <TouchableOpacity
                 style={styles.stepperBtn}
                 onPress={handleIncreaseDuration}
-                activeOpacity={0.6}>
+                activeOpacity={0.6}
+              >
                 <Text style={styles.stepperText}>+</Text>
               </TouchableOpacity>
             </View>
@@ -240,17 +281,21 @@ export const ContinuousTestSetupView: React.FC<ContinuousTestSetupViewProps> = (
             <View style={styles.activeContinuousBox}>
               <View style={styles.activeBadgeRow}>
                 <View style={styles.activeDot} />
-                <Text style={styles.activeBadgeText}>CONTINUOUS TESTING ACTIVE</Text>
+                <Text style={styles.activeBadgeText}>
+                  CONTINUOUS TESTING ACTIVE
+                </Text>
               </View>
               <Text style={styles.activeContinuousDetails}>
-                Running {testType.toUpperCase()} tests every {gapSeconds}s (max {durationMins} mins)
+                Running {testType.toUpperCase()} tests every {gapSeconds}s (max{' '}
+                {durationMins} mins)
               </Text>
             </View>
 
             <TouchableOpacity
               style={styles.stopBtn}
               onPress={onStopTest}
-              activeOpacity={0.85}>
+              activeOpacity={0.85}
+            >
               <StopIcon size={18} color="#FFFFFF" />
               <Text style={styles.stopBtnText}>Stop Continuous Test</Text>
             </TouchableOpacity>
@@ -259,7 +304,8 @@ export const ContinuousTestSetupView: React.FC<ContinuousTestSetupViewProps> = (
           <TouchableOpacity
             style={styles.startBtn}
             onPress={handleStart}
-            activeOpacity={0.85}>
+            activeOpacity={0.85}
+          >
             <RocketIcon size={20} color="#0F172A" />
             <Text style={styles.startBtnText}>Start Test</Text>
           </TouchableOpacity>

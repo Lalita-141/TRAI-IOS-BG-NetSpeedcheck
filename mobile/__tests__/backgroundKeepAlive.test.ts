@@ -158,6 +158,14 @@ describe('scheduled keep-alive', () => {
   const day = 24 * 60 * 60 * 1000;
   const base = { frequency: 'daily' as const, fromDate: '', toDate: '', hour: 0, minute: 0 };
 
+  // The scheduler starts a repeating due-check timer that runs for the app's lifetime.
+  // Fake timers keep it inside this test, so it can't fire after Jest has shut down.
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
   it('holds while runs remain and releases when the schedule is cleared or over', async () => {
     await scheduledTestService.setSchedule({
       ...base,

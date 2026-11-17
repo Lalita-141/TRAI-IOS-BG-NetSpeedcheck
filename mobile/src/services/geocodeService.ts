@@ -25,8 +25,7 @@ export async function reverseGeocode(
     const res = await fetch(`${serverUrl}/v1/locations/reverse?lat=${lat}&lng=${lng}`, {
       headers: { Accept: 'application/json' },
       signal: controller.signal,
-    });
-    clearTimeout(timeout);
+    }).finally(() => clearTimeout(timeout)); // also when the request fails
 
     if (res.ok) {
       const data = await res.json();
@@ -53,8 +52,7 @@ export async function reverseGeocode(
         },
         signal: controller.signal,
       }
-    );
-    clearTimeout(timeout);
+    ).finally(() => clearTimeout(timeout)); // also when the request fails
 
     if (res.ok) {
       const data = await res.json();
