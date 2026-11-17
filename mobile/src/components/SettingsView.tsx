@@ -473,7 +473,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
           <View style={styles.settingCardContent}>
             <Text style={styles.settingCardTitle}>{t('about_us', 'About Us')}</Text>
             <Text style={styles.settingCardSubtitle}>
-              {t('about_us_sub', 'NetSpeed Monitor & TRAI regulations')}
+              {t('about_us_sub', 'About NetSpeed Monitor')}
             </Text>
           </View>
           <ChevronRightIcon size={18} color="#94A3B8" />
@@ -819,9 +819,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigChanged }) =
                 Empowering consumers with objective, transparent cellular and Wi-Fi performance metrics.
               </Text>
               <View style={styles.aboutDivider} />
-              <Text style={styles.aboutHeading}>TRAI Telemetry Standards</Text>
+              <Text style={styles.aboutHeading}>How We Measure</Text>
               <Text style={styles.aboutParagraph}>
-                This application complies with QoS reporting guidelines established by the Telecom Regulatory Authority of India (TRAI), enabling consumers and regulators to identify coverage blindspots and evaluate actual QoS.
+                This application measures real network quality (download and upload speed, latency, jitter, packet loss, video and web browsing performance) using industry-standard QoS methods, helping you find coverage blindspots and see the service you actually receive.
               </Text>
               <Text style={styles.aboutHeading}>Engineered By</Text>
               <Text style={styles.aboutParagraph}>Hare and Turtle AI Technologies Pvt. Ltd.</Text>
